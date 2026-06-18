@@ -117,9 +117,18 @@ class TreeRepository:
         return list(self._trees.keys())
 
     def unregister_nodes(self, node_ids: list[str]) -> None:
-        """Remove node IDs from the node-to-tree mapping."""
+        """Remove lookup IDs from the node-to-tree mapping."""
         for nid in node_ids:
             self._node_to_tree.pop(nid, None)
+
+    def unregister_node_lookups(self, nodes: list[MessageNode]) -> None:
+        """Remove node and status-message lookup IDs for removed nodes."""
+        lookup_ids: list[str] = []
+        for node in nodes:
+            lookup_ids.append(node.node_id)
+            if node.status_message_id:
+                lookup_ids.append(node.status_message_id)
+        self.unregister_nodes(lookup_ids)
 
     def remove_tree(self, root_id: str) -> MessageTree | None:
         """
@@ -130,8 +139,7 @@ class TreeRepository:
         tree = self._trees.pop(root_id, None)
         if not tree:
             return None
-        for node in tree.all_nodes():
-            self._node_to_tree.pop(node.node_id, None)
+        self.unregister_node_lookups(tree.all_nodes())
         logger.debug("TREE_REPO: remove_tree root_id={}", root_id)
         return tree
 

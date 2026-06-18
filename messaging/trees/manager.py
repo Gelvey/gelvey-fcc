@@ -275,8 +275,9 @@ class TreeQueueManager:
             if tree.is_current_node(node_id):
                 self._processor.cancel_current(tree)
 
+            removed_from_queue = False
             try:
-                tree.remove_from_queue(node_id)
+                removed_from_queue = tree.remove_from_queue(node_id)
             except Exception:
                 logger.debug(
                     "Failed to remove node from queue; will rely on state=ERROR"
@@ -284,7 +285,10 @@ class TreeQueueManager:
 
             tree.set_node_error_sync(node, "Cancelled by user")
 
-            return [node]
+        if removed_from_queue:
+            await self._processor.notify_queue_updated(tree)
+
+        return [node]
 
     async def cancel_all(self) -> list[MessageNode]:
         """Cancel all messages in all trees."""
@@ -342,6 +346,7 @@ class TreeQueueManager:
 
         branch_ids = set(tree.get_descendants(branch_root_id))
         cancelled: list[MessageNode] = []
+        removed_from_queue = False
 
         async with tree.with_lock():
             for nid in branch_ids:
@@ -357,12 +362,16 @@ class TreeQueueManager:
                     tree.set_node_error_sync(node, "Cancelled by user")
                     cancelled.append(node)
                 else:
-                    tree.remove_from_queue(nid)
+                    removed_from_queue = (
+                        tree.remove_from_queue(nid) or removed_from_queue
+                    )
                     tree.set_node_error_sync(node, "Cancelled by user")
                     cancelled.append(node)
 
         if cancelled:
             logger.info(f"Cancelled {len(cancelled)} nodes in branch {branch_root_id}")
+        if removed_from_queue:
+            await self._processor.notify_queue_updated(tree)
         return cancelled
 
     async def remove_branch(
@@ -392,7 +401,7 @@ class TreeQueueManager:
         async with tree.with_lock():
             removed = tree.remove_branch(branch_root_id)
 
-        self._repository.unregister_nodes([n.node_id for n in removed])
+        self._repository.unregister_node_lookups(removed)
         return (removed, root_id, False)
 
     def get_message_ids_for_chat(self, platform: str, chat_id: str) -> set[str]:

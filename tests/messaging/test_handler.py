@@ -491,6 +491,8 @@ async def test_node_runner_process_node_error_flow(
     )
 
     mock_tree = MagicMock()
+    mock_tree.root_id = "root_1"
+    mock_tree.to_dict.return_value = {"data": "tree"}
     mock_tree.update_state = AsyncMock()
 
     with (
@@ -505,6 +507,9 @@ async def test_node_runner_process_node_error_flow(
 
         handler.tree_queue.mark_node_error.assert_called_once_with(
             node_id, "CLI crashed", propagate_to_children=True
+        )
+        handler.session_store.save_tree.assert_called_once_with(
+            "root_1", {"data": "tree"}
         )
 
         last_call = mock_platform.queue_edit_message.call_args_list[-1]

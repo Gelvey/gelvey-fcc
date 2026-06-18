@@ -16,7 +16,7 @@ from .platforms.base import MessagingPlatform, SessionManagerInterface
 from .safe_diagnostics import format_exception_for_log
 from .session import SessionStore
 from .transcript import RenderCtx, TranscriptBuffer
-from .trees import MessageNode, MessageState, TreeQueueManager
+from .trees import MessageNode, MessageState, MessageTree, TreeQueueManager
 from .ui_updates import ThrottledTranscriptEditor
 
 
@@ -61,6 +61,11 @@ class MessagingNodeRunner:
             debug_subagent_stack=self._debug_subagent_stack,
         )
         return transcript, self._get_render_ctx()
+
+    def _save_tree(self, tree: MessageTree | None) -> None:
+        """Persist tree state after runner-owned mutations."""
+        if tree:
+            self.session_store.save_tree(tree.root_id, tree.to_dict())
 
     async def process_node(
         self,
@@ -180,6 +185,7 @@ class MessagingNodeRunner:
                         MessageState.ERROR,
                         error_message=error_message,
                     )
+                    self._save_tree(tree)
                 trace_event(
                     stage="claude_cli",
                     event="claude_cli.session.limit_reached",
@@ -263,6 +269,7 @@ class MessagingNodeRunner:
                 await tree.update_state(
                     node_id, MessageState.ERROR, error_message="Cancelled by user"
                 )
+                self._save_tree(tree)
         except Exception as e:
             trace_event(
                 stage="claude_cli",
@@ -315,9 +322,12 @@ class MessagingNodeRunner:
         child_status_text: str,
     ) -> None:
         """Mark node as error and propagate to pending children with UI updates."""
-        affected = await self._get_tree_queue().mark_node_error(
+        tree_queue = self._get_tree_queue()
+        affected = await tree_queue.mark_node_error(
             node_id, error_msg, propagate_to_children=True
         )
+        if affected:
+            self._save_tree(tree_queue.get_tree_for_node(node_id))
         for child in affected[1:]:
             self.platform.fire_and_forget(
                 self.platform.queue_edit_message(

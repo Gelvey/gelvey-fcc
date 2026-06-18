@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -151,6 +152,8 @@ async def test_node_runner_process_node_session_limit_marks_error_and_updates_ui
     handler = MessagingWorkflow(platform, cli_manager, session_store)
 
     fake_tree = MagicMock()
+    fake_tree.root_id = "root"
+    fake_tree.to_dict = MagicMock(return_value={"root": "error"})
     fake_tree.update_state = AsyncMock()
     with patch.object(
         handler.tree_queue, "get_tree_for_node", MagicMock(return_value=fake_tree)
@@ -167,6 +170,55 @@ async def test_node_runner_process_node_session_limit_marks_error_and_updates_ui
         await handler.node_runner.process_node("n1", node)
     assert platform.queue_edit_message.await_count >= 1
     fake_tree.update_state.assert_awaited()
+    session_store.save_tree.assert_called_once_with("root", {"root": "error"})
+
+
+@pytest.mark.asyncio
+async def test_node_runner_cancellation_marks_error_and_saves_tree():
+    platform = MagicMock()
+    platform.queue_edit_message = AsyncMock()
+    platform.fire_and_forget = MagicMock(
+        side_effect=lambda c: getattr(c, "close", lambda: None)()
+    )
+
+    async def _cancelled_start_task(*args, **kwargs):
+        raise asyncio.CancelledError
+        yield
+
+    mock_session = MagicMock()
+    mock_session.start_task = _cancelled_start_task
+    cli_manager = MagicMock()
+    cli_manager.get_or_create_session = AsyncMock(
+        return_value=(mock_session, "s1", False)
+    )
+    cli_manager.remove_session = AsyncMock()
+    cli_manager.get_stats.return_value = {"active_sessions": 0}
+
+    session_store = MagicMock()
+    handler = MessagingWorkflow(platform, cli_manager, session_store)
+
+    fake_tree = MagicMock()
+    fake_tree.root_id = "root"
+    fake_tree.to_dict = MagicMock(return_value={"root": "cancelled"})
+    fake_tree.update_state = AsyncMock()
+    with patch.object(
+        handler.tree_queue, "get_tree_for_node", MagicMock(return_value=fake_tree)
+    ):
+        incoming = IncomingMessage(
+            text="hi",
+            chat_id="c",
+            user_id="u",
+            message_id="n1",
+            platform="telegram",
+        )
+        node = MessageNode(node_id="n1", incoming=incoming, status_message_id="s1")
+
+        await handler.node_runner.process_node("n1", node)
+
+    fake_tree.update_state.assert_any_await(
+        "n1", MessageState.ERROR, error_message="Cancelled by user"
+    )
+    session_store.save_tree.assert_called_once_with("root", {"root": "cancelled"})
 
 
 @pytest.mark.asyncio

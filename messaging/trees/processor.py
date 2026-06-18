@@ -51,6 +51,10 @@ class TreeQueueProcessor:
                 format_exception_for_log(e, log_full_message=d),
             )
 
+    async def notify_queue_updated(self, tree: MessageTree) -> None:
+        """Invoke the queue update callback after external queue mutations."""
+        await self._notify_queue_updated(tree)
+
     async def _notify_node_started(self, tree: MessageTree, node_id: str) -> None:
         """Invoke node started callback if set."""
         if not self._node_started_callback:
@@ -107,25 +111,37 @@ class TreeQueueProcessor:
     ) -> None:
         """Process the next message in queue, if any."""
         next_node_id = None
+        node: MessageNode | None = None
+        discarded_stale_ids = False
         async with tree.with_lock():
-            next_node_id = await tree.dequeue()
+            while True:
+                next_node_id = await tree.dequeue()
 
-            if not next_node_id:
-                tree.set_processing_state(None, False)
-                logger.debug(f"Tree {tree.root_id} queue empty, marking as free")
-                return
+                if not next_node_id:
+                    tree.set_processing_state(None, False)
+                    logger.debug(f"Tree {tree.root_id} queue empty, marking as free")
+                    break
 
-            tree.set_processing_state(next_node_id, True)
-            logger.info(f"Processing next queued node {next_node_id}")
+                node = tree.get_node(next_node_id)
+                if node:
+                    tree.set_processing_state(next_node_id, True)
+                    logger.info(f"Processing next queued node {next_node_id}")
+                    tree.set_current_task(
+                        asyncio.create_task(self.process_node(tree, node, processor))
+                    )
+                    break
 
-            node = tree.get_node(next_node_id)
-            if node:
-                tree.set_current_task(
-                    asyncio.create_task(self.process_node(tree, node, processor))
+                discarded_stale_ids = True
+                logger.debug(
+                    "Skipping stale queued node {} in tree {}",
+                    next_node_id,
+                    tree.root_id,
                 )
 
-        if next_node_id:
+        if next_node_id and node:
             await self._notify_node_started(tree, next_node_id)
+            await self._notify_queue_updated(tree)
+        elif discarded_stale_ids:
             await self._notify_queue_updated(tree)
 
     async def enqueue_and_start(
