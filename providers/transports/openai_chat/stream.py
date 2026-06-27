@@ -95,8 +95,6 @@ class OpenAIChatStreamAdapter:
             body=provider_chat_body_snapshot(body),
         )
 
-        yield ledger.message_start()
-
         think_parser = ThinkTagParser()
         heuristic_parser = HeuristicToolParser()
         finish_reason = None
@@ -106,6 +104,9 @@ class OpenAIChatStreamAdapter:
 
         async with self._transport._global_rate_limiter.concurrency_slot():
             while True:
+                if not ledger.message_started:
+                    for event in hold_event(ledger.message_start()):
+                        yield event
                 stream_opened = False
                 try:
                     stream, body = await self._transport._create_stream(body)

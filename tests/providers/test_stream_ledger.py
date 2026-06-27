@@ -479,6 +479,50 @@ class TestAnthropicStreamLedgerStateManagement:
         events = list(builder.ensure_text_block())
         assert events == []
 
+    def test_append_text_suffix_closes_open_thinking_before_switching(self):
+        builder = AnthropicStreamLedger("msg_1", "model")
+        builder.start_thinking_block()
+
+        events = list(builder.append_thinking_suffix(" step"))
+        events.extend(builder.append_text_suffix(" answer"))
+        parsed = parse_sse_text("".join(events))
+
+        assert [event.event for event in parsed] == [
+            "content_block_delta",
+            "content_block_stop",
+            "content_block_start",
+            "content_block_delta",
+        ]
+        assert parsed[0].data["index"] == 0
+        assert parsed[1].data["index"] == 0
+        assert parsed[2].data["index"] == 1
+        assert parsed[2].data["content_block"]["type"] == "text"
+        assert parsed[3].data["index"] == 1
+        assert builder.blocks.thinking_started is False
+        assert builder.blocks.text_started is True
+
+    def test_append_thinking_suffix_closes_open_text_before_switching(self):
+        builder = AnthropicStreamLedger("msg_1", "model")
+        builder.start_text_block()
+
+        events = list(builder.append_text_suffix(" answer"))
+        events.extend(builder.append_thinking_suffix(" step"))
+        parsed = parse_sse_text("".join(events))
+
+        assert [event.event for event in parsed] == [
+            "content_block_delta",
+            "content_block_stop",
+            "content_block_start",
+            "content_block_delta",
+        ]
+        assert parsed[0].data["index"] == 0
+        assert parsed[1].data["index"] == 0
+        assert parsed[2].data["index"] == 1
+        assert parsed[2].data["content_block"]["type"] == "thinking"
+        assert parsed[3].data["index"] == 1
+        assert builder.blocks.text_started is False
+        assert builder.blocks.thinking_started is True
+
     def test_close_content_blocks(self):
         builder = AnthropicStreamLedger("msg_1", "model")
         builder.start_thinking_block()

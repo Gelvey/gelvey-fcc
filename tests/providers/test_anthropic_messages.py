@@ -10,6 +10,7 @@ from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from core.anthropic.stream_contracts import event_index, parse_sse_text
 from core.anthropic.streaming import (
     MIDSTREAM_RECOVERY_ATTEMPTS,
+    AnthropicStreamLedger,
     TruncatedProviderStreamError,
     format_sse_event,
 )
@@ -400,6 +401,53 @@ async def test_midstream_error_after_native_message_delta_does_not_duplicate_ter
         not in {"content_block_start", "content_block_delta", "content_block_stop"}
         for event in parsed[message_delta_index + 1 :]
     )
+
+
+@pytest.mark.asyncio
+async def test_native_text_recovery_closes_thinking_before_text_suffix():
+    """Recovery suffixes preserve Anthropic block ordering when switching types."""
+    transport = MagicMock()
+    transport._provider_name = "TEST_NATIVE"
+    recovery = AnthropicMessagesRecovery(
+        transport,
+        iter_stream_chunks=MagicMock(),
+    )
+    ledger = AnthropicStreamLedger("msg_recovery", "test-model")
+    ledger.start_thinking_block()
+    ledger.emit_thinking_delta("thinking")
+
+    with patch.object(
+        recovery,
+        "collect_text",
+        new_callable=AsyncMock,
+        return_value=("answer", "thinking more"),
+    ):
+        events = await recovery.events(
+            body={"messages": []},
+            request=MockRequest(),
+            ledger=ledger,
+            error=TimeoutError("cutoff"),
+            request_id="req_native_recovery",
+            req_tag="",
+            thinking_enabled=True,
+        )
+
+    assert events is not None
+    parsed = parse_sse_text("".join(events))
+    assert [event.event for event in parsed] == [
+        "content_block_delta",
+        "content_block_stop",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    assert parsed[0].data["index"] == 0
+    assert parsed[1].data["index"] == 0
+    assert parsed[2].data["index"] == 1
+    assert parsed[2].data["content_block"]["type"] == "text"
+    assert parsed[3].data["index"] == 1
 
 
 @pytest.mark.asyncio

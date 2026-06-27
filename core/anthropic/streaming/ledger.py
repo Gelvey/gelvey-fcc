@@ -452,21 +452,19 @@ class AnthropicStreamLedger:
     def append_text_suffix(self, suffix: str) -> Iterator[str]:
         if not suffix or not self.can_append_content():
             return
+        yield from self.ensure_text_block()
         active = self._last_open_block("text")
         if active is None:
-            index = self.blocks.allocate_index()
-            yield self.content_block_start(index, "text")
-            active = self._content_blocks[index]
+            return
         yield self.content_block_delta(active.index, "text_delta", suffix)
 
     def append_thinking_suffix(self, suffix: str) -> Iterator[str]:
         if not suffix or not self.can_append_content():
             return
+        yield from self.ensure_thinking_block()
         active = self._last_open_block("thinking")
         if active is None:
-            index = self.blocks.allocate_index()
-            yield self.content_block_start(index, "thinking")
-            active = self._content_blocks[index]
+            return
         yield self.content_block_delta(active.index, "thinking_delta", suffix)
 
     def append_tool_repair_suffix(self, tool_index: int, suffix: str) -> Iterator[str]:

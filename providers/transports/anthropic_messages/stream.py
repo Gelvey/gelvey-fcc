@@ -16,8 +16,8 @@ from core.anthropic.streaming import (
     tool_schemas_by_name,
 )
 from core.trace import provider_native_messages_body_snapshot, trace_event
+from providers.transports.http import maybe_await_aclose
 
-from .http import maybe_await_aclose
 from .recovery import AnthropicMessagesRecovery
 
 

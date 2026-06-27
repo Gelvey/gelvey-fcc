@@ -18,6 +18,7 @@ from core.anthropic.streaming import (
     tool_schemas_by_name,
 )
 from core.trace import trace_event
+from providers.transports.http import maybe_await_aclose
 
 from .tool_calls import all_emitted_tools_complete, started_tool_states
 
@@ -35,6 +36,7 @@ class OpenAIChatRecovery:
         """Collect text/reasoning from an internal recovery request."""
         last_error: Exception | None = None
         for attempt in range(MIDSTREAM_RECOVERY_ATTEMPTS):
+            stream: Any | None = None
             try:
                 stream, _ = await self._create_stream(body)
                 text_parts: list[str] = []
@@ -74,6 +76,9 @@ class OpenAIChatRecovery:
                     max_attempts=MIDSTREAM_RECOVERY_ATTEMPTS,
                     exc_type=type(error).__name__,
                 )
+            finally:
+                if stream is not None:
+                    await maybe_await_aclose(stream)
         if last_error is not None:
             raise last_error
         return "", ""

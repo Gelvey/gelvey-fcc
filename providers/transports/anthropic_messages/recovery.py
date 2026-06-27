@@ -21,8 +21,7 @@ from core.anthropic.streaming import (
     tool_schemas_by_name,
 )
 from core.trace import trace_event
-
-from .http import maybe_await_aclose
+from providers.transports.http import maybe_await_aclose
 
 IterStreamChunks = Callable[..., AsyncIterator[str]]
 

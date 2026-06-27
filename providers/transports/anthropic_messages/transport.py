@@ -28,8 +28,9 @@ from providers.model_listing import (
     model_infos_from_ids,
 )
 from providers.rate_limit import GlobalRateLimiter
+from providers.transports.http import maybe_await_aclose
 
-from .http import maybe_await_aclose, model_list_json, raise_for_status_with_body
+from .http import model_list_json, raise_for_status_with_body
 from .stream import AnthropicMessagesStreamAdapter
 
 StreamChunkMode = Literal["line", "event"]

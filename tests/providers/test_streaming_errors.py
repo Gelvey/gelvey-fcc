@@ -45,6 +45,17 @@ class AsyncStreamMock:
             raise self._error
 
 
+class ClosableAsyncStreamMock(AsyncStreamMock):
+    """Async stream mock that records cleanup."""
+
+    def __init__(self, chunks, error=None):
+        super().__init__(chunks, error=error)
+        self.closed = False
+
+    async def aclose(self):
+        self.closed = True
+
+
 def _make_provider():
     """Create a provider instance for testing."""
     config = ProviderConfig(
@@ -188,6 +199,9 @@ class TestStreamingExceptionHandling:
         assert "message_start" in event_text
         assert "API failed" in event_text
         assert "message_stop" in event_text
+        parsed = parse_sse_text(event_text)
+        assert parsed[0].event == "message_start"
+        assert sum(event.event == "message_start" for event in parsed) == 1
         _assert_no_content_deltas_after_error_text(events, "API failed")
 
     @pytest.mark.asyncio
@@ -716,7 +730,10 @@ class TestStreamingExceptionHandling:
         assert mock_create.await_count == 2
         assert "hidden" not in event_text
         assert "visible" in event_text
-        assert parse_sse_text(event_text)[-1].event == "message_stop"
+        parsed = parse_sse_text(event_text)
+        assert parsed[0].event == "message_start"
+        assert sum(event.event == "message_start" for event in parsed) == 1
+        assert parsed[-1].event == "message_stop"
 
     @pytest.mark.asyncio
     async def test_clean_eof_after_text_continues_with_overlap_trim(self):
@@ -759,9 +776,11 @@ class TestStreamingExceptionHandling:
     @pytest.mark.asyncio
     async def test_recovery_collect_text_requires_finish_reason(self):
         """Recovery collectors reject truncated OpenAI-chat continuation streams."""
-        create_stream = AsyncMock(
-            return_value=(AsyncStreamMock([_make_chunk(content="world")]), {})
-        )
+        streams = [
+            ClosableAsyncStreamMock([_make_chunk(content=f"world {index}")])
+            for index in range(MIDSTREAM_RECOVERY_ATTEMPTS)
+        ]
+        create_stream = AsyncMock(side_effect=[(stream, {}) for stream in streams])
         recovery = OpenAIChatRecovery(
             provider_name="NIM",
             create_stream=create_stream,
@@ -771,18 +790,42 @@ class TestStreamingExceptionHandling:
             await recovery.collect_text({"messages": []})
 
         assert create_stream.await_count == MIDSTREAM_RECOVERY_ATTEMPTS
+        assert all(stream.closed for stream in streams)
+
+    @pytest.mark.asyncio
+    async def test_recovery_collect_text_closes_retryable_failed_streams(self):
+        """Recovery collectors close failed stream attempts before retrying."""
+        streams = [
+            ClosableAsyncStreamMock(
+                [_make_chunk(content=f"partial {index}")],
+                error=TimeoutError("recovery cutoff"),
+            )
+            for index in range(MIDSTREAM_RECOVERY_ATTEMPTS)
+        ]
+        create_stream = AsyncMock(side_effect=[(stream, {}) for stream in streams])
+        recovery = OpenAIChatRecovery(
+            provider_name="NIM",
+            create_stream=create_stream,
+        )
+
+        with pytest.raises(TimeoutError):
+            await recovery.collect_text({"messages": []})
+
+        assert create_stream.await_count == MIDSTREAM_RECOVERY_ATTEMPTS
+        assert all(stream.closed for stream in streams)
 
     @pytest.mark.asyncio
     async def test_recovery_collect_text_accepts_finish_reason(self):
         """Recovery collectors return text only after the upstream terminal marker."""
+        stream = ClosableAsyncStreamMock(
+            [
+                _make_chunk(content="world"),
+                _make_chunk(finish_reason="stop"),
+            ]
+        )
         create_stream = AsyncMock(
             return_value=(
-                AsyncStreamMock(
-                    [
-                        _make_chunk(content="world"),
-                        _make_chunk(finish_reason="stop"),
-                    ]
-                ),
+                stream,
                 {},
             )
         )
@@ -792,6 +835,7 @@ class TestStreamingExceptionHandling:
         )
 
         assert await recovery.collect_text({"messages": []}) == ("world", "")
+        assert stream.closed is True
 
     @pytest.mark.asyncio
     async def test_truncated_recovery_stream_falls_back_to_error_tail(self):
