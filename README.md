@@ -51,7 +51,7 @@ This is a personal fork of [Alishahryar1/free-claude-code](https://github.com/Al
 - **OpenRouter ZDR enforcement** — `data_collection=allow` is forced on every OpenRouter request (upstream `openrouter/free` policy). See `providers/openrouter.py`.
 - **MCP meta-router** — bundled `scripts/mcp/` router, CLI launcher, and example config so MCP servers can sit behind the proxy.
 - **`scripts/fcc-launcher.sh`** — convenience wrapper that puts `fcc-server`, `fcc-claude`, and `fcc-codex` on your PATH and launches a tmux session.
-- **Path portability** — bundled scripts derive all paths at runtime: `Path(__file__).resolve().parent` and `os.path.expanduser("~/...")` in Python (e.g. `scripts/mcp/mcp_router.py` acting on the `~/.mcp-router/` state dir), `cd "$(dirname "$0")" && pwd` in shell, `$HOME`-based derivations in `scripts/fcc-launcher.sh`, and a pure-string-substitution `expand_path()` helper in `scripts/mcp/start_mcp.sh` so example configs can use portable `~/...` placeholders. No host-specific absolute paths are committed.
+- **Path portability** — bundled scripts derive all paths at runtime: `Path(__file__).resolve().parent` for in-repo paths (e.g. `scripts/mcp/mcp_router.py`’s config default at line 56), `cd "$(dirname "$0")" && pwd` in shell, and `$HOME`-based derivations in `scripts/fcc-launcher.sh` and `scripts/mcp/start_mcp.sh`’s `~/.mcp-router/` state/pid/log directories, and a pure-string-substitution `expand_path()` helper in `scripts/mcp/start_mcp.sh` so example configs can use portable `~/...` placeholders. No host-specific absolute paths are committed.
 
 ### Sanitization guarantees
 
