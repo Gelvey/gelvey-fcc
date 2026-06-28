@@ -69,7 +69,7 @@ kitty \
     --listen-on "unix:$SOCKET" \
     --override "allow_remote_control=socket-only" \
     --title "FCC" \
-    bash -c "echo '=== FCC Claude ===' && fcc-claude; exec bash" &
+    bash -c "echo '=== FCC Claude (waiting ${FCC_CLIENT_WARMUP_S:-5}s for fcc-server) ===' && sleep ${FCC_CLIENT_WARMUP_S:-5} && fcc-claude; exec bash" &
 
 KITTY_PID=$!
 sleep 1
