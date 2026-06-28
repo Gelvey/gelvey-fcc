@@ -1,5 +1,6 @@
-"""CLI integration for installed launchers and managed Claude Code."""
+"""CLI integration for Claude Code."""
 
-from .managed import ManagedClaudeSession, ManagedClaudeSessionManager
+from .manager import CLISessionManager
+from .session import CLISession
 
-__all__ = ["ManagedClaudeSession", "ManagedClaudeSessionManager"]
+__all__ = ["CLISession", "CLISessionManager"]

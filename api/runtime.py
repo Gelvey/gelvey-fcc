@@ -12,17 +12,15 @@ from fastapi import FastAPI
 from loguru import logger
 
 from api.admin_urls import local_admin_url
-from config.env_files import ANTHROPIC_AUTH_TOKEN_ENV, process_env_key_is_effective
-from config.paths import default_claude_workspace_path
 from config.settings import Settings, get_settings
 from providers.exceptions import ServiceUnavailableError
-from providers.runtime import ProviderRuntime
+from providers.registry import ProviderRegistry
 
 if TYPE_CHECKING:
-    from cli.managed import ManagedClaudeSessionManager
-    from messaging.platforms.ports import MessagingPlatformComponents, MessagingRuntime
+    from cli.manager import CLISessionManager
+    from messaging.handler import ClaudeMessageHandler
+    from messaging.platforms.base import MessagingPlatform
     from messaging.session import SessionStore
-    from messaging.workflow import MessagingWorkflow
 
 _SHUTDOWN_TIMEOUT_S = 5.0
 
@@ -57,8 +55,7 @@ async def best_effort(
 
 def warn_if_process_auth_token(settings: Settings) -> None:
     """Warn when server auth was implicitly inherited from the shell."""
-    model_config = getattr(settings, "model_config", Settings.model_config)
-    if process_env_key_is_effective(model_config, ANTHROPIC_AUTH_TOKEN_ENV):
+    if settings.uses_process_anthropic_auth_token():
         logger.warning(
             "ANTHROPIC_AUTH_TOKEN is set in the process environment but not in "
             "a configured .env file. The proxy will require that token. Add "
@@ -90,10 +87,10 @@ class AppRuntime:
 
     app: FastAPI
     settings: Settings
-    _provider_runtime: ProviderRuntime | None = field(default=None, init=False)
-    messaging_runtime: MessagingRuntime | None = None
-    messaging_workflow: MessagingWorkflow | None = None
-    cli_manager: ManagedClaudeSessionManager | None = None
+    _provider_registry: ProviderRegistry | None = field(default=None, init=False)
+    messaging_platform: MessagingPlatform | None = None
+    message_handler: ClaudeMessageHandler | None = None
+    cli_manager: CLISessionManager | None = None
 
     @classmethod
     def for_app(
@@ -106,12 +103,12 @@ class AppRuntime:
     async def startup(self) -> None:
         logger.info("Starting Claude Code Proxy...")
         admin_url = local_admin_url(self.settings)
-        self._provider_runtime = ProviderRuntime(self.settings)
-        self.app.state.provider_runtime = self._provider_runtime
+        self._provider_registry = ProviderRegistry()
+        self.app.state.provider_registry = self._provider_registry
         try:
             warn_if_process_auth_token(self.settings)
             await self._validate_configured_models_best_effort()
-            self._provider_runtime.start_model_list_refresh()
+            self._provider_registry.start_model_list_refresh(self.settings)
             await self._start_messaging_if_configured()
             self._publish_state()
             logging.getLogger("uvicorn.error").info(
@@ -120,18 +117,18 @@ class AppRuntime:
         except Exception as exc:
             log_startup_failure(self.settings, exc)
             await best_effort(
-                "provider_runtime.cleanup",
-                self._provider_runtime.cleanup(),
+                "provider_registry.cleanup",
+                self._provider_registry.cleanup(),
                 log_verbose_errors=self.settings.log_api_error_tracebacks,
             )
             raise
 
     async def _validate_configured_models_best_effort(self) -> None:
         """Warm validation status without blocking first-run/admin access."""
-        if self._provider_runtime is None:
+        if self._provider_registry is None:
             return
         try:
-            await self._provider_runtime.validate_configured_models()
+            await self._provider_registry.validate_configured_models(self.settings)
         except ServiceUnavailableError as exc:
             self.app.state.startup_validation_error = exc.message
             logger.warning(
@@ -143,9 +140,9 @@ class AppRuntime:
 
     async def shutdown(self) -> None:
         verbose = self.settings.log_api_error_tracebacks
-        if self.messaging_workflow is not None:
+        if self.message_handler is not None:
             try:
-                self.messaging_workflow.session_store.flush_pending_save()
+                self.message_handler.session_store.flush_pending_save()
             except Exception as e:
                 if verbose:
                     logger.warning("Session store flush on shutdown: {}", e)
@@ -156,10 +153,10 @@ class AppRuntime:
                     )
 
         logger.info("Shutdown requested, cleaning up...")
-        if self.messaging_runtime:
+        if self.messaging_platform:
             await best_effort(
-                "messaging_runtime.stop",
-                self.messaging_runtime.stop(),
+                "messaging_platform.stop",
+                self.messaging_platform.stop(),
                 log_verbose_errors=verbose,
             )
         if self.cli_manager:
@@ -168,10 +165,10 @@ class AppRuntime:
                 self.cli_manager.stop_all(),
                 log_verbose_errors=verbose,
             )
-        if self._provider_runtime is not None:
+        if self._provider_registry is not None:
             await best_effort(
-                "provider_runtime.cleanup",
-                self._provider_runtime.cleanup(),
+                "provider_registry.cleanup",
+                self._provider_registry.cleanup(),
                 log_verbose_errors=verbose,
             )
         await self._shutdown_limiter()
@@ -181,10 +178,10 @@ class AppRuntime:
         try:
             from messaging.platforms.factory import (
                 MessagingPlatformOptions,
-                create_messaging_components,
+                create_messaging_platform,
             )
 
-            components = create_messaging_components(
+            self.messaging_platform = create_messaging_platform(
                 self.settings.messaging_platform,
                 MessagingPlatformOptions(
                     telegram_bot_token=self.settings.telegram_bot_token,
@@ -203,8 +200,8 @@ class AppRuntime:
                 ),
             )
 
-            if components:
-                await self._start_messaging_workflow(components)
+            if self.messaging_platform:
+                await self._start_message_handler()
 
         except ImportError as e:
             if self.settings.log_api_error_tracebacks:
@@ -226,12 +223,10 @@ class AppRuntime:
                     type(e).__name__,
                 )
 
-    async def _start_messaging_workflow(
-        self, components: MessagingPlatformComponents
-    ) -> None:
-        from cli.managed import ManagedClaudeSessionManager
+    async def _start_message_handler(self) -> None:
+        from cli.manager import CLISessionManager
+        from messaging.handler import ClaudeMessageHandler
         from messaging.session import SessionStore
-        from messaging.workflow import MessagingWorkflow
 
         workspace = (
             os.path.abspath(self.settings.allowed_dir)
@@ -240,18 +235,21 @@ class AppRuntime:
         )
         os.makedirs(workspace, exist_ok=True)
 
-        data_path = os.path.abspath(default_claude_workspace_path())
+        data_path = os.path.abspath(self.settings.claude_workspace)
         os.makedirs(data_path, exist_ok=True)
 
         api_url = f"http://{self.settings.host}:{self.settings.port}/v1"
         allowed_dirs = [workspace] if self.settings.allowed_dir else []
-        plans_dir_abs = os.path.abspath(os.path.join(data_path, "plans"))
+        plans_dir_abs = os.path.abspath(
+            os.path.join(self.settings.claude_workspace, "plans")
+        )
         plans_directory = os.path.relpath(plans_dir_abs, workspace)
-        self.cli_manager = ManagedClaudeSessionManager(
+        self.cli_manager = CLISessionManager(
             workspace_path=workspace,
             api_url=api_url,
             allowed_dirs=allowed_dirs,
             plans_directory=plans_directory,
+            claude_bin=self.settings.claude_cli_bin,
             auth_token=getattr(self.settings, "anthropic_auth_token", ""),
             log_raw_cli_diagnostics=self.settings.log_raw_cli_diagnostics,
             log_messaging_error_details=self.settings.log_messaging_error_details,
@@ -261,11 +259,10 @@ class AppRuntime:
             storage_path=os.path.join(data_path, "sessions.json"),
             message_log_cap=self.settings.max_message_log_entries_per_chat,
         )
-        self.messaging_runtime = components.runtime
-        self.messaging_workflow = MessagingWorkflow(
-            platform_name=components.name,
-            outbound=components.outbound,
-            voice_cancellation=components.voice_cancellation,
+        platform = self.messaging_platform
+        assert platform is not None
+        self.message_handler = ClaudeMessageHandler(
+            platform=platform,
             cli_manager=self.cli_manager,
             session_store=session_store,
             debug_platform_edits=self.settings.debug_platform_edits,
@@ -276,38 +273,39 @@ class AppRuntime:
         )
         self._restore_tree_state(session_store)
 
-        components.runtime.on_message(self.messaging_workflow.handle_message)
-        await components.runtime.start()
-        logger.info("{} platform started with messaging workflow", components.name)
+        platform.on_message(self.message_handler.handle_message)
+        await platform.start()
+        logger.info(f"{platform.name} platform started with message handler")
 
     def _restore_tree_state(self, session_store: SessionStore) -> None:
-        conversation_snapshot = session_store.load_conversation_snapshot()
-        if conversation_snapshot.is_empty:
+        saved_trees = session_store.get_all_trees()
+        if not saved_trees:
             return
-        if self.messaging_workflow is None:
+        if self.message_handler is None:
             return
 
-        logger.info(
-            "Restoring {} conversation trees...",
-            len(conversation_snapshot.trees),
-        )
-        from messaging.trees import TreeQueueManager
+        logger.info(f"Restoring {len(saved_trees)} conversation trees...")
+        from messaging.trees.queue_manager import TreeQueueManager
 
-        self.messaging_workflow.replace_tree_queue(
-            TreeQueueManager.from_snapshot(
-                conversation_snapshot,
-                queue_update_callback=self.messaging_workflow.update_queue_positions,
-                node_started_callback=self.messaging_workflow.mark_node_processing,
+        self.message_handler.replace_tree_queue(
+            TreeQueueManager.from_dict(
+                {
+                    "trees": saved_trees,
+                    "node_to_tree": session_store.get_node_mapping(),
+                },
+                queue_update_callback=self.message_handler.update_queue_positions,
+                node_started_callback=self.message_handler.mark_node_processing,
             )
         )
-        if self.messaging_workflow.tree_queue.cleanup_stale_nodes() > 0:
-            session_store.save_conversation_snapshot(
-                self.messaging_workflow.tree_queue.snapshot()
+        if self.message_handler.tree_queue.cleanup_stale_nodes() > 0:
+            tree_data = self.message_handler.tree_queue.to_dict()
+            session_store.sync_from_tree_data(
+                tree_data["trees"], tree_data["node_to_tree"]
             )
 
     def _publish_state(self) -> None:
-        self.app.state.messaging_runtime = self.messaging_runtime
-        self.app.state.messaging_workflow = self.messaging_workflow
+        self.app.state.messaging_platform = self.messaging_platform
+        self.app.state.message_handler = self.message_handler
         self.app.state.cli_manager = self.cli_manager
 
     async def _shutdown_limiter(self) -> None:

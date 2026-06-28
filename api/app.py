@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import pydantic
+import pydantic_settings.exceptions
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -163,8 +165,43 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def general_error_handler(request: Request, exc: Exception):
-        """Handle general errors and return Anthropic format."""
-        settings = get_settings()
+        """Handle general errors and return Anthropic format.
+
+        ``get_settings()`` itself can raise (``SettingsError``,
+        ``pydantic.ValidationError``, dotenv ``OSError`` /
+        ``UnicodeDecodeError``). When it raises, this handler must still
+        emit a clean JSON 500 envelope instead of re-entrantly failing
+        (which is what spammed ``/admin/api/providers/*/test`` with a
+        recursive 500 when an empty ``OPENROUTER_FREE_MODEL_IDS`` broke
+        ``Settings()``). The catch is scoped to known settings / validation
+        failure modes; unrelated exceptions still propagate to Starlette.
+        """
+        try:
+            settings = get_settings()
+        except (
+            pydantic_settings.exceptions.SettingsError,
+            pydantic.ValidationError,
+            OSError,
+            UnicodeDecodeError,
+        ) as settings_exc:
+            logger.opt(exception=settings_exc).error(
+                "General Error: settings reload failed path={} method={} "
+                "original_exc={} settings_exc={}",
+                request.url.path,
+                request.method,
+                type(exc).__name__,
+                type(settings_exc).__name__,
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "message": "An unexpected error occurred.",
+                    },
+                },
+            )
         if settings.log_api_error_tracebacks:
             logger.error("General Error: {}", exc)
             logger.error(traceback.format_exc())

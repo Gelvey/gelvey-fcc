@@ -6,9 +6,23 @@ Provider adapters supply policy via parameters (defaults, OpenRouter post-steps)
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel
+
+
+class OpenRouterPolicySettings(Protocol):
+    """Structural subset of :class:`config.settings.Settings` used by the OpenRouter data-policy helpers.
+
+    The full ``Settings`` model is not required: only the three policy fields
+    below. This lets tests and small adapter shims pass a ``SimpleNamespace``
+    stub without instantiating the full Pydantic model.
+    """
+
+    open_router_data_collection: str
+    open_router_free_data_collection: str
+    open_router_free_model_ids: frozenset[str]
+
 
 _REQUEST_FIELDS = (
     "model",
@@ -249,8 +263,17 @@ def build_openrouter_native_request_body(
     *,
     thinking_enabled: bool,
     default_max_tokens: int,
+    openrouter_provider_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build an Anthropic-format request body for OpenRouter (policy hooks built-in)."""
+    """Build an Anthropic-format request body for OpenRouter (policy hooks built-in).
+
+    ``openrouter_provider_options`` is the result of
+    :func:`resolve_openrouter_provider_options` and is deep-merged into the
+    ``provider`` field of the body *after* the caller's ``extra_body`` is
+    applied, so the gateway's ``data_collection`` always wins over a client
+    override while other client-supplied ``provider.*`` keys (e.g. ``order``)
+    are preserved.
+    """
     dumped_request = _dump_request_fields(request_data)
     request_extra = dumped_request.pop("extra_body", None)
     thinking_cfg = dumped_request.get("thinking")
@@ -277,4 +300,44 @@ def build_openrouter_native_request_body(
     if thinking_enabled:
         _apply_openrouter_reasoning_policy(body, thinking_cfg)
 
+    # Server-wins: deep-merge the provider policy options into body["provider"]
+    # so a client cannot override the gateway's data_collection via extra_body,
+    # while other provider.* keys supplied by the client survive intact.
+    if openrouter_provider_options:
+        new_provider = openrouter_provider_options.get("provider")
+        if isinstance(new_provider, dict):
+            existing = body.get("provider")
+            if isinstance(existing, dict):
+                merged_provider = dict(existing)
+                merged_provider.update(new_provider)
+                body["provider"] = merged_provider
+            else:
+                body["provider"] = dict(new_provider)
+
     return body
+
+
+def resolve_openrouter_provider_options(
+    provider_model: str,
+    settings: OpenRouterPolicySettings,
+) -> dict[str, Any]:
+    """Return the ``provider`` object to inject on an OpenRouter request body.
+
+    The result is always a dict with a single ``provider`` key whose value is a
+    ``{"data_collection": "deny"|"allow"}`` dict. The chosen value comes from
+    :attr:`OpenRouterPolicySettings.open_router_free_data_collection` when
+    ``provider_model`` is in
+    :attr:`OpenRouterPolicySettings.open_router_free_model_ids`; otherwise it
+    comes from :attr:`OpenRouterPolicySettings.open_router_data_collection`.
+
+    Server-wins precedence: callers MUST merge the returned dict into the
+    request body *after* any client-supplied ``extra_body`` so a malicious or
+    buggy client cannot override the operator's policy.
+    """
+    free_ids = settings.open_router_free_model_ids
+    policy = (
+        settings.open_router_free_data_collection
+        if provider_model in free_ids
+        else settings.open_router_data_collection
+    )
+    return {"provider": {"data_collection": policy}}

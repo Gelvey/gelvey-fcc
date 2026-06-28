@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from config.nim import NimSettings
-from core.anthropic import StreamBlockLedger
+from core.anthropic import ContentBlockManager
 from providers.base import ProviderConfig
 from providers.nvidia_nim import NvidiaNimProvider
 from providers.transports.openai_chat.tool_calls import OpenAIToolCallAssembler
@@ -16,12 +16,12 @@ async def test_task_tool_interception():
     config = ProviderConfig(api_key="test")
     provider = NvidiaNimProvider(config, nim_settings=NimSettings())
 
-    # Mock request and stream ledger with real StreamBlockLedger
+    # Mock request and sse builder with real ContentBlockManager
     request = MagicMock()
     request.model = "test-model"
 
     sse = MagicMock()
-    sse.blocks = StreamBlockLedger()
+    sse.blocks = ContentBlockManager()
 
     # Tool call data (Task tool)
     tc = {

@@ -1,7 +1,6 @@
 """Tests for Wafer native Anthropic Messages provider."""
 
 from contextlib import asynccontextmanager
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -9,7 +8,6 @@ import pytest
 
 from api.models.anthropic import Message, MessagesRequest, Tool
 from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
-from core.anthropic.stream_contracts import parse_sse_text
 from providers.base import ProviderConfig
 from providers.wafer import WAFER_DEFAULT_BASE, WaferProvider
 from tests.stream_contract import assert_canonical_stream_error_envelope
@@ -43,18 +41,6 @@ class FakeResponse:
             text=self._text,
         )
         response.raise_for_status()
-
-
-class CountingWaferProvider(WaferProvider):
-    def __init__(self, config: ProviderConfig):
-        super().__init__(config)
-        self.thinking_checks = 0
-
-    def _is_thinking_enabled(
-        self, request: Any, thinking_enabled: bool | None = None
-    ) -> bool:
-        self.thinking_checks += 1
-        return super()._is_thinking_enabled(request, thinking_enabled)
 
 
 @pytest.fixture
@@ -159,22 +145,7 @@ def test_build_request_body_drops_reasoning_effort_none(wafer_provider):
     assert body["thinking"] == {"type": "enabled"}
 
 
-def test_build_request_body_honors_effective_no_thinking(
-    wafer_provider,
-):
-    request = MessagesRequest.model_validate(
-        {
-            "model": "DeepSeek-V4-Pro",
-            "messages": [{"role": "user", "content": "Explore the codebase."}],
-        }
-    )
-
-    body = wafer_provider._build_request_body(request, thinking_enabled=False)
-
-    assert body["thinking"] == {"type": "disabled"}
-
-
-def test_build_request_body_preserves_request_disabled_thinking(
+def test_build_request_body_keeps_upstream_thinking_enabled_when_client_disables_it(
     wafer_provider,
 ):
     request = MessagesRequest.model_validate(
@@ -185,51 +156,9 @@ def test_build_request_body_preserves_request_disabled_thinking(
         }
     )
 
-    body = wafer_provider._build_request_body(request, thinking_enabled=True)
-
-    assert body["thinking"] == {"type": "disabled"}
-
-
-def test_build_request_body_resolves_thinking_once(wafer_config):
-    provider = CountingWaferProvider(wafer_config)
-    request = MessagesRequest.model_validate(
-        {
-            "model": "DeepSeek-V4-Pro",
-            "messages": [{"role": "user", "content": "Explore the codebase."}],
-        }
-    )
-
-    body = provider._build_request_body(request, thinking_enabled=False)
-
-    assert body["thinking"] == {"type": "disabled"}
-    assert provider.thinking_checks == 1
-
-
-def test_build_request_body_classifier_no_thinking_uses_disabled_payload(
-    wafer_provider,
-):
-    request = MessagesRequest.model_validate(
-        {
-            "model": "DeepSeek-V4-Pro",
-            "system": (
-                "You are a security monitor. Respond with <block>yes</block> "
-                "or <block>no</block>."
-            ),
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        "<transcript>\nWebFetch https://example.com\n"
-                        "</transcript>\n<block> immediately."
-                    ),
-                }
-            ],
-        }
-    )
-
     body = wafer_provider._build_request_body(request, thinking_enabled=False)
 
-    assert body["thinking"] == {"type": "disabled"}
+    assert body["thinking"] == {"type": "enabled"}
 
 
 @pytest.mark.asyncio
@@ -289,9 +218,13 @@ async def test_stream_uses_post_messages_path(wafer_provider):
     ):
         events = [event async for event in wafer_provider.stream_response(request)]
 
-    assert [event.event for event in parse_sse_text("".join(events))] == [
-        "message_start",
-        "message_stop",
+    assert events == [
+        "event: message_start\n",
+        'data: {"type":"message_start"}\n',
+        "\n",
+        "event: message_stop\n",
+        'data: {"type":"message_stop"}\n',
+        "\n",
     ]
     assert response.is_closed
     assert mock_build.call_args.args[:2] == ("POST", "/messages")

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .command_context import MessagingCommandContext
+from typing import Any
+
 from .commands import handle_clear_command, handle_stats_command, handle_stop_command
 from .models import IncomingMessage
 
@@ -20,7 +21,7 @@ def message_kind_for_command(command_base: str) -> str:
 
 
 async def dispatch_command(
-    context: MessagingCommandContext,
+    handler: Any,
     incoming: IncomingMessage,
     command_base: str,
 ) -> bool:
@@ -33,5 +34,5 @@ async def dispatch_command(
     command = commands.get(command_base)
     if command is None:
         return False
-    await command(context, incoming)
+    await command(handler, incoming)
     return True

@@ -6,17 +6,9 @@ from typing import Any
 
 from providers.base import ProviderConfig
 from providers.defaults import CEREBRAS_DEFAULT_BASE
-from providers.transports.openai_chat import (
-    OpenAIChatRequestPolicy,
-    OpenAIChatTransport,
-    build_openai_chat_request_body,
-)
+from providers.transports.openai_chat import OpenAIChatTransport
 
-_REQUEST_POLICY = OpenAIChatRequestPolicy(
-    provider_name="CEREBRAS",
-    include_extra_body=True,
-    max_tokens_field="max_completion_tokens",
-)
+from .request import build_request_body
 
 
 class CerebrasProvider(OpenAIChatTransport):
@@ -33,8 +25,7 @@ class CerebrasProvider(OpenAIChatTransport):
     def _build_request_body(
         self, request: Any, thinking_enabled: bool | None = None
     ) -> dict:
-        return build_openai_chat_request_body(
+        return build_request_body(
             request,
             thinking_enabled=self._is_thinking_enabled(request, thinking_enabled),
-            policy=_REQUEST_POLICY,
         )

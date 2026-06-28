@@ -11,14 +11,12 @@ from providers.base import ProviderConfig
 from providers.defaults import NVIDIA_NIM_DEFAULT_BASE
 from providers.transports.openai_chat import OpenAIChatTransport
 
-from .request_options import build_nim_request_body
-from .retry import (
+from .request import (
+    body_without_nim_tool_argument_aliases,
+    build_request_body,
     clone_body_without_chat_template,
     clone_body_without_reasoning_budget,
     clone_body_without_reasoning_content,
-)
-from .tool_schema import (
-    body_without_nim_tool_argument_aliases,
     nim_tool_argument_aliases_from_body,
 )
 
@@ -39,7 +37,7 @@ class NvidiaNimProvider(OpenAIChatTransport):
         self, request: Any, thinking_enabled: bool | None = None
     ) -> dict:
         """Internal helper for tests and shared building."""
-        return build_nim_request_body(
+        return build_request_body(
             request,
             self._nim_settings,
             thinking_enabled=self._is_thinking_enabled(request, thinking_enabled),

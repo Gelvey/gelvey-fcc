@@ -1,4 +1,4 @@
-"""Native Anthropic Messages upstream adapter."""
+"""Per-request native Anthropic Messages stream runner."""
 
 from __future__ import annotations
 
@@ -7,18 +7,29 @@ from typing import Any
 
 import httpx
 
-from core.anthropic.stream_contracts import parse_sse_text
-from core.anthropic.streaming import (
-    AnthropicStreamLedger,
-    RecoveryController,
-    RecoveryFailureAction,
+from core.anthropic.emitted_sse_tracker import EmittedNativeSseTracker
+from core.anthropic.native_sse_block_policy import NativeSseBlockPolicyState
+from core.anthropic.stream_recovery import (
     TruncatedProviderStreamError,
     tool_schemas_by_name,
 )
+from core.anthropic.stream_recovery_session import (
+    StreamFailureAction,
+    StreamRecoverySession,
+)
 from core.trace import provider_native_messages_body_snapshot, trace_event
-from providers.transports.http import maybe_await_aclose
 
+from .http import maybe_await_aclose
 from .recovery import AnthropicMessagesRecovery
+
+
+async def iter_sse_lines(response: httpx.Response) -> AsyncIterator[str]:
+    """Yield raw SSE line chunks preserving local provider behavior."""
+    async for line in response.aiter_lines():
+        if line:
+            yield f"{line}\n"
+        else:
+            yield "\n"
 
 
 async def iter_sse_events(response: httpx.Response) -> AsyncIterator[str]:
@@ -35,8 +46,8 @@ async def iter_sse_events(response: httpx.Response) -> AsyncIterator[str]:
         yield "\n".join(event_lines) + "\n\n"
 
 
-class AnthropicMessagesStreamAdapter:
-    """Convert one native Anthropic upstream stream into normalized Anthropic SSE."""
+class AnthropicMessagesStreamRunner:
+    """Own mutable state for one native Anthropic provider stream."""
 
     def __init__(
         self,
@@ -85,8 +96,11 @@ class AnthropicMessagesStreamAdapter:
         state = self._transport._new_stream_state(
             self._request, thinking_enabled=thinking_enabled
         )
-        ledger = self._new_ledger()
-        recovery = RecoveryController(provider_name=tag, request_id=self._request_id)
+        emitted_tracker = EmittedNativeSseTracker()
+        recovery_session = StreamRecoverySession(
+            provider_name=tag,
+            request_id=self._request_id,
+        )
 
         async with self._transport._global_rate_limiter.concurrency_slot():
             while True:
@@ -100,6 +114,7 @@ class AnthropicMessagesStreamAdapter:
                         )
                     )
                     stream_opened = True
+
                     chunk_count = 0
                     chunk_bytes = 0
 
@@ -110,15 +125,12 @@ class AnthropicMessagesStreamAdapter:
                     ):
                         chunk_count += 1
                         chunk_bytes += len(chunk.encode("utf-8", errors="replace"))
-                        for parsed in parse_sse_text(chunk):
-                            emitted = ledger.ingest_native_event(parsed)
-                            if emitted is None:
-                                continue
-                            for event in recovery.push(emitted):
-                                sent_any_event = True
-                                yield event
+                        emitted_tracker.feed(chunk)
+                        for event in recovery_session.push(chunk):
+                            sent_any_event = True
+                            yield event
 
-                    if not ledger.has_terminal_message():
+                    if not emitted_tracker.has_terminal_message():
                         raise TruncatedProviderStreamError(
                             "Provider stream ended without message_stop."
                         )
@@ -132,39 +144,42 @@ class AnthropicMessagesStreamAdapter:
                         sse_chunks_out=chunk_count,
                         sse_bytes_out=chunk_bytes,
                     )
-                    for event in recovery.flush():
+                    for event in recovery_session.flush():
                         sent_any_event = True
                         yield event
                     return
 
                 except Exception as error:
-                    generated_output = ledger.has_content_block()
-                    complete_tool_salvageable = generated_output and (
-                        ledger.can_salvage_tool_use(tool_schemas_by_name(self._request))
+                    generated_output = emitted_tracker.has_content_block()
+                    complete_tool_salvageable = (
+                        generated_output
+                        and emitted_tracker.can_salvage_tool_use(
+                            tool_schemas_by_name(self._request)
+                        )
                     )
-                    decision = recovery.advance_failure(
+                    decision = recovery_session.advance_failure(
                         error,
                         stream_opened=stream_opened,
                         generated_output=generated_output,
                         complete_tool_salvageable=complete_tool_salvageable,
                     )
-                    if decision.action == RecoveryFailureAction.EARLY_RETRY:
+                    if decision.action == StreamFailureAction.EARLY_RETRY:
                         if response is not None and not response.is_closed:
                             await maybe_await_aclose(response)
                         response = None
                         state = self._transport._new_stream_state(
                             self._request, thinking_enabled=thinking_enabled
                         )
-                        ledger = self._new_ledger()
+                        emitted_tracker = EmittedNativeSseTracker()
                         sent_any_event = False
                         continue
 
-                    if decision.action == RecoveryFailureAction.MIDSTREAM_RECOVERY:
+                    if decision.action == StreamFailureAction.MIDSTREAM_RECOVERY:
                         try:
                             recovery_events = await self._recovery.events(
                                 body=body,
                                 request=self._request,
-                                ledger=ledger,
+                                tracker=emitted_tracker,
                                 error=error,
                                 request_id=self._request_id,
                                 req_tag=req_tag,
@@ -181,7 +196,7 @@ class AnthropicMessagesStreamAdapter:
                             )
                             recovery_events = None
                         if recovery_events is not None:
-                            for event in recovery.flush_uncommitted(decision):
+                            for event in recovery_session.flush_uncommitted(decision):
                                 sent_any_event = True
                                 yield event
                             for event in recovery_events:
@@ -214,13 +229,22 @@ class AnthropicMessagesStreamAdapter:
                     )
                     if decision.committed or decision.has_buffered:
                         if not decision.committed:
-                            for event in recovery.flush():
+                            for event in recovery_session.flush():
                                 sent_any_event = True
                                 yield event
-                        for event in ledger.midstream_error_tail(error_message):
+                        for event in emitted_tracker.iter_close_unclosed_blocks():
+                            yield event
+                        for event in emitted_tracker.iter_midstream_error_tail(
+                            error_message,
+                            request=self._request,
+                            input_tokens=self._input_tokens,
+                            log_raw_sse_events=(
+                                self._transport._config.log_raw_sse_events
+                            ),
+                        ):
                             yield event
                     else:
-                        recovery.discard()
+                        recovery_session.discard()
                         for event in self._transport._emit_error_events(
                             request=self._request,
                             input_tokens=self._input_tokens,
@@ -240,7 +264,27 @@ class AnthropicMessagesStreamAdapter:
         state: Any,
         thinking_enabled: bool,
     ) -> AsyncIterator[str]:
-        """Yield normalized grouped SSE events from the provider stream."""
+        """Yield chunks according to the provider's observable stream shape."""
+        if self._transport.stream_chunk_mode == "line" and isinstance(
+            state, NativeSseBlockPolicyState
+        ):
+            async for event in iter_sse_events(response):
+                output_event = self._transport._transform_stream_event(
+                    event,
+                    state,
+                    thinking_enabled=thinking_enabled,
+                )
+                if output_event is None:
+                    continue
+                for line in output_event.splitlines(keepends=True):
+                    yield line
+            return
+
+        if self._transport.stream_chunk_mode == "line":
+            async for chunk in iter_sse_lines(response):
+                yield chunk
+            return
+
         async for event in iter_sse_events(response):
             output_event = self._transport._transform_stream_event(
                 event,
@@ -249,11 +293,3 @@ class AnthropicMessagesStreamAdapter:
             )
             if output_event is not None:
                 yield output_event
-
-    def _new_ledger(self) -> AnthropicStreamLedger:
-        return AnthropicStreamLedger(
-            None,
-            self._request.model,
-            self._input_tokens,
-            log_raw_events=self._transport._config.log_raw_sse_events,
-        )

@@ -3,14 +3,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from messaging.trees import MessageState
-from messaging.workflow import MessagingWorkflow
+from messaging.handler import ClaudeMessageHandler
+from messaging.trees.data import MessageState
 
 
 @pytest.fixture
 def handler_integration(mock_platform, mock_cli_manager, mock_session_store):
     # Use real TreeQueueManager
-    handler = MessagingWorkflow(mock_platform, mock_cli_manager, mock_session_store)
+    handler = ClaudeMessageHandler(mock_platform, mock_cli_manager, mock_session_store)
     return handler
 
 

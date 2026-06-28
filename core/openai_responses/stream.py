@@ -6,7 +6,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Mapping
 from typing import Any
 
 from .anthropic_sse import iter_sse_events
-from .streaming import ResponsesStreamAssembler
+from .stream_state import ResponsesStreamAssembler
 
 
 async def iter_responses_sse_from_anthropic(

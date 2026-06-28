@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "2.3.23"
+version = "2.3.6"
 description = "Middleware between Claude Code CLI (Anthropic API) and NVIDIA NIM"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -16,12 +16,12 @@ dependencies = [
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "tiktoken>=0.13.0",
-    "python-telegram-bot>=22.8",
+    "python-telegram-bot>=22.7",
     "discord.py>=2.7.1",
     "pydantic-settings>=2.14.1",
-    "openai>=2.43.0",
+    "openai>=2.41.0",
     "loguru>=0.7.0",
-    "aiohttp>=3.14.1",
+    "aiohttp>=3.14.0",
     "jsonschema>=4.25.0",
 ]
 
@@ -29,19 +29,19 @@ dependencies = [
 fcc-server = "cli.entrypoints:serve"
 free-claude-code = "cli.entrypoints:serve"
 fcc-init = "cli.entrypoints:init"
-fcc-claude = "cli.launchers.claude:launch"
-fcc-codex = "cli.launchers.codex:launch"
+fcc-claude = "cli.entrypoints:launch_claude"
+fcc-codex = "cli.entrypoints:launch_codex"
 
 [project.optional-dependencies]
 voice = [
-    "grpcio>=1.81.1",
-    "grpcio-tools>=1.81.1",
+    "grpcio>=1.81.0",
+    "grpcio-tools>=1.81.0",
     "nvidia-riva-client>=2.26.0",
 ]
 voice_local = [
-    "torch>=2.12.1",
-    "transformers>=5.12.1",
-    "accelerate>=1.14.0",
+    "torch>=2.12.0",
+    "transformers>=5.10.2",
+    "accelerate>=1.13.0",
     "librosa>=0.10.0",
 ]
 
@@ -49,7 +49,7 @@ voice_local = [
 packages = ["api", "cli", "config", "core", "messaging", "providers"]
 
 [tool.hatch.build.targets.wheel.force-include]
-".env.example" = "config/env.example"
+".env.example" = "cli/env.example"
 
 [tool.uv]
 required-version = ">=0.11.0"
@@ -64,11 +64,11 @@ explicit = true
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.0",
+    "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
-    "ty>=0.0.50",
-    "ruff>=0.15.18",
+    "ty>=0.0.44",
+    "ruff>=0.15.16",
     "pytest-xdist>=3.8.0",
 ]
 
@@ -127,4 +127,10 @@ python-version = "3.14"
 [tool.ty.analysis]
 # Optional voice_local extra: torch, transformers, librosa for local whisper transcription
 # Optional voice extra: nvidia-riva-client for nvidia_nim transcription provider
-allowed-unresolved-imports = ["torch", "transformers", "librosa", "riva.client"]
+# MCP router (scripts/mcp/) runs in its own venv with the `mcp` SDK; those imports
+# are listed here so ty doesn't fail when the SDK isn't in the main project venv.
+allowed-unresolved-imports = ["torch", "transformers", "librosa", "riva.client", "mcp", "mcp.client.sse", "mcp.server", "mcp.shared.message"]
+# MCP router (scripts/mcp/) runs in its own venv with the `mcp` SDK installed there,
+# not in the main project venv. Replace its imports with Any so ty doesn't try to
+# resolve members (ClientSession, types, Server, etc.) that aren't installed here.
+replace-imports-with-any = ["mcp", "mcp.client.sse", "mcp.server", "mcp.shared.message"]

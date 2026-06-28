@@ -577,8 +577,8 @@ free-claude-code/
 ├── api/                   # FastAPI routes, service layer, routing, optimizations
 ├── core/                  # Shared Anthropic protocol helpers, SSE, OpenAI Responses
 │   └── openai_responses/  # Responses ↔ Anthropic conversion and SSE mapping
-├── providers/             # Provider runtime, transports, rate limiting
-├── messaging/             # Discord/Telegram runtimes, outbound ports, voice
+├── providers/             # Provider transports, registry, rate limiting
+├── messaging/             # Discord/Telegram adapters, sessions, voice
 ├── cli/                   # Package entry points and client CLI process management
 ├── config/                # Settings, provider catalog, logging
 └── tests/                 # Unit and contract tests
@@ -596,9 +596,7 @@ uv run uvicorn server:app --host 0.0.0.0 --port 8082
 
 ### 3. Commands
 
-Run the local CI sequence (requires `uv` on PATH). The local scripts format
-Python files and apply autofixable Ruff lint fixes before type checking and
-tests:
+Run all GitHub CI checks locally (requires `uv` on PATH):
 
 ```bash
 ./scripts/ci.sh
@@ -610,17 +608,14 @@ tests:
 
 Useful flags: `--only pytest`, `--skip pytest`, `--dry-run` (PowerShell: `-Only pytest`, `-Skip pytest`, `-DryRun`).
 
-Or run individual repair/check commands manually:
+Or run individual checks manually:
 
 ```bash
-uv run ruff format
-uv run ruff check --fix
+uv run ruff format --check
+uv run ruff check
 uv run ty check
 uv run pytest -v --tb=short
 ```
-
-GitHub CI remains check-only for Ruff with `uv run ruff format --check` and
-`uv run ruff check`, so required status checks verify committed code.
 
 CI also enforces a ban on `# type: ignore` / `# ty: ignore` suppressions; `scripts/ci.sh` and `scripts/ci.ps1` run that grep too.
 
@@ -639,17 +634,17 @@ CI also enforces a ban on `# type: ignore` / `# ty: ignore` suppressions; `scrip
 - Add OpenAI-compatible providers by extending `OpenAIChatTransport`.
 - Add Anthropic Messages providers by extending `AnthropicMessagesTransport`.
 - Extend OpenAI Responses conversion in `core/openai_responses/` when Codex adds new request or stream shapes.
-- Register provider metadata in `config.provider_catalog` and factory wiring in `providers.runtime`.
-- Add messaging platforms by wiring runtime, outbound, and inbound-normalizer ports in `messaging/platforms/`.
+- Register provider metadata in `config.provider_catalog` and factory wiring in `providers.registry`.
+- Add messaging platforms by implementing the `MessagingPlatform` interface in `messaging/`.
 
 ## Contributing
 
+This is a fork of [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) with local customisations (OpenRouter ZDR enforcement, MCP meta-router, and minor fixes) merged directly into the repo.
+
 - [`.env.example`](.env.example) lists env key names as a read-only reference for contributors; use the **Admin UI** to change managed proxy settings.
-- Report bugs and feature requests in [Issues](https://github.com/Alishahryar1/free-claude-code/issues). For bug always include all model mapping, current model when issue occured and the issue string
+- `scripts/mcp/mcp_config.json` is gitignored — copy `scripts/mcp/mcp_config.example.json` and fill in real secrets.
 - Keep changes small and covered by focused tests.
-- Do not open Docker integration PRs.
-- Do not open README change PRs just open an issue for it.
-- Run the full check sequence before opening a pull request.
+- Run the full check sequence before pushing.
 - The syntax `except X, Y` is brought back in python 3.14 final version (not in 3.14 alpha). Keep in mind before opening PRs.
 
 ## License

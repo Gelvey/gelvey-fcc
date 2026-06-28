@@ -11,14 +11,13 @@ show_usage() {
     cat <<'USAGE'
 Usage: ci.sh [options]
 
-Runs the local sequence for the same check IDs enforced by GitHub CI.
+Runs the same local checks enforced by GitHub CI (.github/workflows/tests.yml).
 Requires uv on PATH when running ruff, ty, or pytest checks.
-Local ruff checks repair formatting and autofixable lint before later checks.
 
 Checks (in order):
   suppressions   Ban # type: ignore / # ty: ignore suppressions
-  ruff-format    uv run ruff format
-  ruff-check     uv run ruff check --fix
+  ruff-format    uv run ruff format --check
+  ruff-check     uv run ruff check
   ty             uv run ty check
   pytest         uv run pytest -v --tb=short
 
@@ -136,13 +135,13 @@ run_suppressions() {
 }
 
 run_ruff_format() {
-    step "ruff format"
-    run uv run ruff format
+    step "ruff format --check"
+    run uv run ruff format --check
 }
 
 run_ruff_check() {
-    step "ruff check --fix"
-    run uv run ruff check --fix
+    step "ruff check"
+    run uv run ruff check
 }
 
 run_ty() {

@@ -1,4 +1,4 @@
-"""Tests for NVIDIA NIM request policy helpers."""
+"""Tests for providers/nvidia_nim/request.py."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -9,19 +9,13 @@ import pytest
 
 from config.nim import NimSettings
 from core.anthropic import set_if_not_none
-from providers.nvidia_nim.request_options import (
+from providers.nvidia_nim.request import (
+    NIM_TOOL_ARGUMENT_ALIASES_KEY,
     _set_extra,
-)
-from providers.nvidia_nim.request_options import (
-    build_nim_request_body as build_request_body,
-)
-from providers.nvidia_nim.retry import (
+    body_without_nim_tool_argument_aliases,
+    build_request_body,
     clone_body_without_chat_template,
     clone_body_without_reasoning_content,
-)
-from providers.nvidia_nim.tool_schema import (
-    NIM_TOOL_ARGUMENT_ALIASES_KEY,
-    body_without_nim_tool_argument_aliases,
     nim_tool_argument_aliases_from_body,
 )
 

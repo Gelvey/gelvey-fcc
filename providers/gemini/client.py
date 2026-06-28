@@ -7,16 +7,11 @@ from typing import Any
 
 from providers.base import ProviderConfig
 from providers.defaults import GEMINI_DEFAULT_BASE
-from providers.transports.openai_chat import (
-    OpenAIChatRequestPolicy,
-    OpenAIChatTransport,
-    build_openai_chat_request_body,
-)
+from providers.transports.openai_chat import OpenAIChatTransport
 
-from .quirks import apply_gemini_request_quirks
+from .request import build_request_body
 
 _MAX_TOOL_CALL_EXTRA_CONTENT_CACHE = 4096
-_REQUEST_POLICY = OpenAIChatRequestPolicy(provider_name="GEMINI")
 
 
 class GeminiProvider(OpenAIChatTransport):
@@ -47,16 +42,8 @@ class GeminiProvider(OpenAIChatTransport):
     def _build_request_body(
         self, request: Any, thinking_enabled: bool | None = None
     ) -> dict:
-        return build_openai_chat_request_body(
+        return build_request_body(
             request,
             thinking_enabled=self._is_thinking_enabled(request, thinking_enabled),
-            policy=_REQUEST_POLICY,
-            postprocessors=(
-                lambda body, request_data, enabled: apply_gemini_request_quirks(
-                    body,
-                    request_data,
-                    enabled,
-                    tool_call_extra_content_by_id=self._tool_call_extra_content_by_id,
-                ),
-            ),
+            tool_call_extra_content_by_id=self._tool_call_extra_content_by_id,
         )

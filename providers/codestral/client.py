@@ -6,20 +6,15 @@ from typing import Any
 
 from providers.base import ProviderConfig
 from providers.defaults import CODESTRAL_DEFAULT_BASE
-from providers.transports.openai_chat import (
-    OpenAIChatRequestPolicy,
-    OpenAIChatTransport,
-    build_openai_chat_request_body,
-)
-
-_REQUEST_POLICY = OpenAIChatRequestPolicy(provider_name="CODESTRAL")
+from providers.mistral.request import build_request_body
+from providers.transports.openai_chat import OpenAIChatTransport
 
 
 class CodestralProvider(OpenAIChatTransport):
     """Codestral host using ``https://codestral.mistral.ai/v1/chat/completions``.
 
     Uses a separate Codestral API key from La Plateforme (``MISTRAL_API_KEY``).
-    Request shaping matches Mistral La Plateforme.
+    Request shaping matches Mistral La Plateforme (shared ``build_request_body``).
     """
 
     def __init__(self, config: ProviderConfig):
@@ -33,8 +28,7 @@ class CodestralProvider(OpenAIChatTransport):
     def _build_request_body(
         self, request: Any, thinking_enabled: bool | None = None
     ) -> dict:
-        return build_openai_chat_request_body(
+        return build_request_body(
             request,
             thinking_enabled=self._is_thinking_enabled(request, thinking_enabled),
-            policy=_REQUEST_POLICY,
         )

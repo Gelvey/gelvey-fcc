@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from core.anthropic import iter_provider_stream_error_sse_events
+from core.anthropic.native_messages_request import OpenRouterPolicySettings
 from core.anthropic.native_sse_block_policy import (
     NativeSseBlockPolicyState,
     is_terminal_openrouter_done_event,
@@ -21,16 +22,12 @@ from providers.model_listing import (
 )
 from providers.transports.anthropic_messages import (
     AnthropicMessagesTransport,
-    NativeMessagesRequestPolicy,
     StreamChunkMode,
-    build_native_messages_request_body,
 )
 
+from .request import build_request_body
+
 _ANTHROPIC_VERSION = "2023-06-01"
-_REQUEST_POLICY = NativeMessagesRequestPolicy(
-    provider_name="OPENROUTER",
-    extra_body="openrouter",
-)
 
 
 class OpenRouterProvider(AnthropicMessagesTransport):
@@ -38,21 +35,30 @@ class OpenRouterProvider(AnthropicMessagesTransport):
 
     stream_chunk_mode: StreamChunkMode = "event"
 
-    def __init__(self, config: ProviderConfig):
+    def __init__(
+        self,
+        config: ProviderConfig,
+        *,
+        settings: OpenRouterPolicySettings | None = None,
+    ):
         super().__init__(
             config,
             provider_name="OPENROUTER",
             default_base_url=OPENROUTER_DEFAULT_BASE,
         )
+        # Settings is optional so existing tests that build the provider from
+        # a bare ProviderConfig keep working. Production code (the registry)
+        # always passes the live settings instance.
+        self._settings: OpenRouterPolicySettings | None = settings
 
     def _build_request_body(
         self, request: Any, thinking_enabled: bool | None = None
     ) -> dict:
         """Internal helper for tests and direct request dispatch."""
-        return build_native_messages_request_body(
+        return build_request_body(
             request,
             thinking_enabled=self._is_thinking_enabled(request, thinking_enabled),
-            policy=_REQUEST_POLICY,
+            settings=self._settings,
         )
 
     def _request_headers(self) -> dict[str, str]:

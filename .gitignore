@@ -15,3 +15,12 @@ debug-*.log
 llama_cache
 .smoke-results
 .vscode
+
+# MCP router — real config holds secrets; only the example template is tracked
+scripts/mcp/mcp_config.json
+scripts/mcp/.venv/
+scripts/mcp/__pycache__/
+scripts/mcp/*.pyc
+
+# Managed FCC config directory (never part of the repo)
+.fcc/

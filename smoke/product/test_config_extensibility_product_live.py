@@ -5,10 +5,9 @@ import subprocess
 
 import pytest
 
-from config.provider_catalog import PROVIDER_CATALOG
 from config.settings import Settings
-from messaging.platforms.factory import create_messaging_components
-from providers.runtime import build_provider_config
+from messaging.platforms.factory import create_messaging_platform
+from providers.registry import PROVIDER_DESCRIPTORS, build_provider_config
 from smoke.lib.child_process import cmd_free_claude_code_serve, cmd_python_c
 from smoke.lib.config import SmokeConfig
 from smoke.lib.e2e import SmokeServerDriver
@@ -77,14 +76,12 @@ def test_per_model_thinking_config_e2e(smoke_config: SmokeConfig, tmp_path) -> N
     env = os.environ.copy()
     env["FCC_ENV_FILE"] = str(env_file)
     script = (
-        "from api.model_router import ModelRouter; "
         "from config.settings import Settings; "
         "s=Settings(); "
-        "r=ModelRouter(s); "
-        "print(r.resolve('claude-opus-4-20250514').thinking_enabled); "
-        "print(r.resolve('claude-sonnet-4-20250514').thinking_enabled); "
-        "print(r.resolve('claude-haiku-4-20250514').thinking_enabled); "
-        "print(r.resolve('unknown-model').thinking_enabled)"
+        "print(s.resolve_thinking('claude-opus-4-20250514')); "
+        "print(s.resolve_thinking('claude-sonnet-4-20250514')); "
+        "print(s.resolve_thinking('claude-haiku-4-20250514')); "
+        "print(s.resolve_thinking('unknown-model'))"
     )
     result = subprocess.run(
         cmd_python_c(script),
@@ -115,9 +112,8 @@ def test_proxy_timeout_config_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
     env["FCC_ENV_FILE"] = str(env_file)
     script = (
         "from config.settings import Settings; "
-        "from config.provider_catalog import PROVIDER_CATALOG; "
-        "from providers.runtime import build_provider_config; "
-        "s=Settings(); c=build_provider_config(PROVIDER_CATALOG['open_router'], s); "
+        "from providers.registry import PROVIDER_DESCRIPTORS, build_provider_config; "
+        "s=Settings(); c=build_provider_config(PROVIDER_DESCRIPTORS['open_router'], s); "
         "print(c.proxy); print(c.http_read_timeout); "
         "print(c.http_connect_timeout); print(c.http_write_timeout)"
     )
@@ -140,9 +136,9 @@ def test_proxy_timeout_config_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
 
 
 @pytest.mark.smoke_target("extensibility")
-def test_provider_runtime_config_e2e() -> None:
+def test_provider_registry_e2e() -> None:
     settings_kwargs: dict[str, str] = {}
-    for descriptor in PROVIDER_CATALOG.values():
+    for descriptor in PROVIDER_DESCRIPTORS.values():
         if descriptor.credential_attr is not None:
             settings_kwargs[_settings_init_key(descriptor.credential_attr)] = (
                 f"{descriptor.provider_id}-key"
@@ -152,7 +148,7 @@ def test_provider_runtime_config_e2e() -> None:
                 descriptor.default_base_url
             )
     settings = Settings.model_validate(settings_kwargs)
-    for descriptor in PROVIDER_CATALOG.values():
+    for descriptor in PROVIDER_DESCRIPTORS.values():
         config = build_provider_config(descriptor, settings)
         assert config.base_url
         assert config.api_key
@@ -165,9 +161,9 @@ def _settings_init_key(field_name: str) -> str:
 
 @pytest.mark.smoke_target("extensibility")
 def test_platform_factory_e2e() -> None:
-    assert create_messaging_components("not-a-platform") is None
-    assert create_messaging_components("telegram") is None
-    assert create_messaging_components("discord") is None
+    assert create_messaging_platform("not-a-platform") is None
+    assert create_messaging_platform("telegram") is None
+    assert create_messaging_platform("discord") is None
 
 
 @pytest.mark.smoke_target("cli")

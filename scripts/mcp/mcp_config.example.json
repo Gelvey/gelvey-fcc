@@ -1,0 +1,24 @@
+{
+  "_comment": "Example backend registry. Copy to mcp_config.json and fill in real values. The real file is gitignored. Each stdio MCP server is exposed by supergateway on http://127.0.0.1:<port>/sse. The meta-router reads this to know which backends exist and what command to spawn.",
+  "router_socket": "~/.mcp-router/sockets/router.sock",
+  "router_pidfile": "~/.mcp-router/run/router.pid",
+  "router_log": "~/.mcp-router/logs/router.log",
+  "health_timeout_s": 30,
+  "servers": {
+    "stripe": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@stripe/mcp@latest"],
+      "env": {
+        "STRIPE_SECRET_KEY": "sk_live_REPLACE_ME"
+      },
+      "port": 7101
+    },
+    "example-sse": {
+      "_comment": "Use type=sse for an existing remote HTTP/SSE MCP server. No supergateway is spawned; the router connects directly to url.",
+      "type": "sse",
+      "url": "http://127.0.0.1:9999/sse",
+      "port": 9999
+    }
+  }
+}

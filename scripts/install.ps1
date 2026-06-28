@@ -131,32 +131,18 @@ function Invoke-ProbeCommand {
     }
 }
 
-function Convert-UvVersionOutput {
-    param([string] $Output)
-
-    if ([string]::IsNullOrWhiteSpace($Output)) {
-        return ""
-    }
-
-    if ($Output -match '(?m)(?:^|\s)(?:uv\s+)?(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)\b') {
-        return $Matches["version"]
-    }
-
-    return ""
-}
-
 function Get-InstalledUvVersion {
     $version = ""
 
     $selfVersionProbe = Invoke-ProbeCommand -FilePath "uv" -Arguments @("self", "version", "--short")
     if ($selfVersionProbe.ExitCode -eq 0) {
-        $version = Convert-UvVersionOutput $selfVersionProbe.Output
+        $version = $selfVersionProbe.Output.Trim()
     }
 
     if ([string]::IsNullOrWhiteSpace($version)) {
         $versionProbe = Invoke-ProbeCommand -FilePath "uv" -Arguments @("--version")
-        if ($versionProbe.ExitCode -eq 0) {
-            $version = Convert-UvVersionOutput $versionProbe.Output
+        if (($versionProbe.ExitCode -eq 0) -and ($versionProbe.Output -match '^uv\s+([^\s]+)')) {
+            $version = $Matches[1]
         }
     }
 
@@ -173,14 +159,8 @@ function Test-UvVersionAtLeast {
         [string] $Minimum
     )
 
-    $normalizedVersion = Convert-UvVersionOutput $Version
-    $normalizedMinimum = Convert-UvVersionOutput $Minimum
-    if ([string]::IsNullOrWhiteSpace($normalizedVersion) -or [string]::IsNullOrWhiteSpace($normalizedMinimum)) {
-        throw "Unable to compare uv versions."
-    }
-
-    $normalizedVersion = $normalizedVersion -replace '[-+].*$', ''
-    $normalizedMinimum = $normalizedMinimum -replace '[-+].*$', ''
+    $normalizedVersion = $Version -replace '[-+].*$', ''
+    $normalizedMinimum = $Minimum -replace '[-+].*$', ''
     return ([version] $normalizedVersion) -ge ([version] $normalizedMinimum)
 }
 

@@ -32,10 +32,9 @@ flowchart LR
     Bots[Discord or Telegram Bots] --> Messaging[Messaging Bridge]
     Messaging --> ClientCLI[Managed Client CLI Sessions]
     ClientCLI --> ProxyAPI
-    ProxyAPI --> Handlers[API Product Handlers]
-    Handlers --> Router[ModelRouter]
-    Handlers --> Executor[ProviderExecutionService]
-    Executor --> Providers[ProviderRuntime]
+    ProxyAPI --> Pipeline[ApiRequestPipeline]
+    Pipeline --> Router[ModelRouter]
+    Pipeline --> Providers[ProviderRegistry]
     Providers --> OpenAIChat[OpenAI Chat Providers]
     Providers --> NativeAnthropic[Anthropic Messages Providers]
 ```
@@ -44,9 +43,8 @@ flowchart LR
 
 The installable wheel packages are declared in [pyproject.toml](pyproject.toml):
 
-- [api/](api/) owns the FastAPI app, route handlers, API product handlers, shared
-  provider execution, model catalog, admin APIs, local optimizations, and
-  server-tool handling.
+- [api/](api/) owns the FastAPI app, route handlers, request pipeline, model
+  catalog, admin APIs, local optimizations, and server-tool handling.
 - [cli/](cli/) owns console entrypoints, client CLI launchers, process/session
   management, and client adapter contracts.
 - [config/](config/) owns settings, provider metadata, filesystem paths,
@@ -107,23 +105,22 @@ The current package boundaries are intentional, but several modules still carry
 large orchestration responsibilities. Treat these as refactor targets, not as
 new places to add unrelated behavior:
 
-- [api/handlers/](api/handlers/) owns customer-facing API product flows:
-  Claude Messages, OpenAI Responses, and token counting. Keep route handlers
-  thin, keep Claude-only behavior in the Messages handler, and use
-  [api/provider_execution.py](api/provider_execution.py) only for shared
-  provider resolution, preflight, tracing, token counting, and streaming.
+- [api/request_pipeline.py](api/request_pipeline.py) coordinates routing,
+  message-only intercepts, provider execution, token counting, and Responses
+  adaptation. Keep route handlers thin and keep new pre-provider behavior as
+  explicit pipeline intercepts.
 - [providers/transports/](providers/transports/) owns provider transport
   families. The OpenAI-chat and native Anthropic transport packages split thin
   transport bases from per-request stream runners, recovery event construction,
-  request policy, and transport-specific parsing. Shared protocol rules should
-  continue moving toward [core/](core/) when they are not provider-specific.
-- [messaging/workflow.py](messaging/workflow.py) coordinates messaging runtime
-  dependencies. Inbound turn intake, queued node execution, slash command
-  dependencies, and tree queue internals live in separate modules so new
-  behavior has one owner instead of growing the workflow object.
-- [api/admin_config/](api/admin_config/) owns Admin UI config behavior. Keep
-  provider fields catalog-driven, and keep manifest, source loading, validation,
-  env rendering, value presentation, and status metadata in their package owners.
+  and transport-specific parsing. Shared protocol rules should continue moving
+  toward [core/](core/) when they are not provider-specific.
+- [messaging/handler.py](messaging/handler.py) owns command dispatch, tree
+  queueing, CLI session execution, transcript updates, and persistence
+  coordination. New platform-specific behavior should stay in platform or
+  rendering modules.
+- [api/admin_config.py](api/admin_config.py) owns the admin config manifest,
+  validation, env rendering, and status metadata. Keep it data-driven, and split
+  only around cohesive admin responsibilities.
 
 ## Runtime Startup And Lifecycle
 
@@ -131,8 +128,8 @@ Console scripts are registered in [pyproject.toml](pyproject.toml):
 
 - `fcc-server` and `free-claude-code` call `cli.entrypoints:serve`.
 - `fcc-init` calls `cli.entrypoints:init`.
-- `fcc-claude` calls `cli.launchers.claude:launch`.
-- `fcc-codex` calls `cli.launchers.codex:launch`.
+- `fcc-claude` calls `cli.entrypoints:launch_claude`.
+- `fcc-codex` calls `cli.entrypoints:launch_codex`.
 
 [scripts/install.sh](scripts/install.sh) and [scripts/install.ps1](scripts/install.ps1)
 install or update the uv tool plus optional voice extras. [scripts/uninstall.sh](scripts/uninstall.sh)
@@ -156,7 +153,7 @@ reported without noisy Starlette tracebacks.
 [api/runtime.py](api/runtime.py) owns process-lifetime resources through
 `AppRuntime`:
 
-- creates and publishes an app-scoped `ProviderRuntime`;
+- creates and publishes an app-scoped `ProviderRegistry`;
 - validates configured models best-effort without blocking first-run admin access;
 - starts provider model-list refresh;
 - starts optional Discord or Telegram messaging when configured;
@@ -166,10 +163,8 @@ reported without noisy Starlette tracebacks.
 
 ## Configuration Model
 
-[config/settings.py](config/settings.py) owns the flat Pydantic Settings schema:
-raw env fields, validation, and `get_settings()`. It should not own routing,
-model-ref parsing, launcher defaults, or web-tool policy. Dotenv discovery lives
-in [config/env_files.py](config/env_files.py) and uses this order:
+[config/settings.py](config/settings.py) centralizes configuration with Pydantic
+Settings. Dotenv files are configured in this order:
 
 1. repo-local `.env`;
 2. managed `~/.fcc/.env`;
@@ -178,8 +173,7 @@ in [config/env_files.py](config/env_files.py) and uses this order:
 Later dotenv files override earlier dotenv files. Process environment variables
 also participate through Pydantic settings resolution. `ANTHROPIC_AUTH_TOKEN`
 has an extra guard after settings are built: if any configured dotenv file
-defines it, that dotenv value replaces a stale inherited shell token. Auth-token
-source detection for startup warnings also belongs to `config/env_files.py`.
+defines it, that dotenv value replaces a stale inherited shell token.
 
 [config/paths.py](config/paths.py) defines managed paths:
 
@@ -197,23 +191,12 @@ Model routing configuration is tiered:
 - `ENABLE_OPUS_THINKING`, `ENABLE_SONNET_THINKING`, and
   `ENABLE_HAIKU_THINKING` optionally override thinking by tier.
 
-[config/model_refs.py](config/model_refs.py) owns provider-prefixed model ref
-parsing and configured `MODEL*` inventory. API routing and provider validation
-depend on those helpers instead of adding behavior methods to Settings.
-
-[api/admin_config/](api/admin_config/) owns the Admin UI config manifest and
-managed env writes. Provider credential, local URL, proxy, and display-name
-metadata is generated from [config/provider_catalog.py](config/provider_catalog.py);
-admin-only help text stays beside the admin manifest. The package splits source
-loading, value presentation, validation, persistence, and provider status into
-separate modules. [api/admin_routes.py](api/admin_routes.py) exposes local-only
-admin endpoints that load, validate, apply, and test config. After an apply,
-settings are cache-cleared. Depending on the changed fields, the server either
-replaces the app provider runtime or asks the supervised server to restart.
-
-[.env.example](.env.example) is the single install/init/admin template source.
-It is packaged as a [config/](config/) resource for `fcc-init` and Admin UI
-template defaults; runtime settings do not read it as a live config file.
+[api/admin_config.py](api/admin_config.py) defines the Admin UI config manifest
+and writes managed env updates. [api/admin_routes.py](api/admin_routes.py)
+exposes local-only admin endpoints that load, validate, apply, and test config.
+After an apply, settings are cache-cleared. Depending on the changed fields, the
+server either replaces the app provider registry or asks the supervised server to
+restart.
 
 Admin routes call `require_loopback_admin()`, which rejects non-loopback clients
 and non-local origins.
@@ -238,42 +221,36 @@ proxy auth is disabled. Otherwise the token may be supplied through `x-api-key`,
 `Authorization: Bearer ...`, or `anthropic-auth-token`. Comparisons use
 constant-time matching.
 
-[api/handlers/](api/handlers/) owns the public API product flows.
-`MessagesHandler` validates non-empty messages, resolves models, applies
-Claude-only safety-classifier and local optimization policy, handles local web
-server tools, then streams Anthropic SSE. `ResponsesHandler` owns streaming-only
-OpenAI Responses validation and conversion for Codex clients. `TokenCountHandler`
-owns Anthropic token counting. Shared provider execution lives in
-[api/provider_execution.py](api/provider_execution.py), which resolves a
-provider, preflights the upstream request, emits trace events, counts input
-tokens, and returns an Anthropic SSE iterator.
+`ApiRequestPipeline` in
+[api/request_pipeline.py](api/request_pipeline.py) coordinates request handling.
+It validates non-empty messages, resolves models, runs explicit message-only
+intercepts for local server tools and optimizations, resolves a provider,
+preflights the upstream request, then streams Anthropic SSE back to the caller.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Route as FastAPIRoute
-    participant Handler as ProductHandler
+    participant Pipeline as ApiRequestPipeline
     participant Router as ModelRouter
-    participant Exec as ProviderExecution
-    participant Runtime as ProviderRuntime
+    participant Registry as ProviderRegistry
     participant Provider
 
     Client->>Route: POST /v1/messages
     Route->>Route: require_api_key
-    Route->>Handler: create message
-    Handler->>Router: resolve model and thinking
-    Handler->>Handler: server tools or optimizations
-    Handler->>Exec: stream routed request
-    Exec->>Runtime: resolve provider
-    Runtime->>Provider: cached or new provider
-    Exec->>Provider: preflight_stream
-    Exec->>Provider: stream_response
+    Route->>Pipeline: create_message
+    Pipeline->>Router: resolve model and thinking
+    Pipeline->>Pipeline: server tools or optimizations
+    Pipeline->>Registry: resolve provider
+    Registry->>Provider: cached or new provider
+    Pipeline->>Provider: preflight_stream
+    Pipeline->>Provider: stream_response
     Provider-->>Client: Anthropic SSE events
 ```
 
-OpenAI Responses uses the same provider execution primitive without importing
-Claude-only message intercepts. `ResponsesHandler` delegates protocol work to
-the `OpenAIResponsesAdapter` in
+OpenAI Responses uses the same provider execution path without message-only
+intercepts. `create_response()` delegates Responses protocol work to the
+`OpenAIResponsesAdapter` in
 [core/openai_responses/adapter.py](core/openai_responses/adapter.py). The adapter
 converts the Responses payload into an Anthropic Messages payload before
 provider execution, then converts Anthropic SSE back to Responses SSE.
@@ -286,13 +263,13 @@ It supports two forms:
 - Direct provider model refs such as `nvidia_nim/nvidia/model-name`.
 - Gateway model IDs decoded by [api/gateway_model_ids.py](api/gateway_model_ids.py).
 
-If the incoming model is not direct, `ModelRouter` maps it by Claude tier. Names
-containing `opus`, `sonnet`, or `haiku` use the matching tier override when set,
-otherwise they fall back to `MODEL`.
+If the incoming model is not direct, `Settings.resolve_model()` maps it by Claude
+tier. Names containing `opus`, `sonnet`, or `haiku` use the matching tier override
+when set, otherwise they fall back to `MODEL`.
 
 The router also resolves thinking. Gateway model IDs can force thinking on or
-off; otherwise `ModelRouter` applies tier-specific thinking overrides or the
-global setting.
+off; otherwise `Settings.resolve_thinking()` applies tier-specific thinking
+overrides or the global setting.
 
 `GET /v1/models` advertises:
 
@@ -301,7 +278,7 @@ global setting.
 - no-thinking variants when appropriate;
 - built-in Claude model IDs for compatibility with Claude clients.
 
-Provider model discovery is app-scoped through `ProviderRuntime`, which caches
+Provider model discovery is app-scoped through `ProviderRegistry`, which caches
 model IDs and optional thinking capability metadata for the model-list route and
 admin status.
 
@@ -318,12 +295,10 @@ Provider metadata is neutral and centralized in
 `ProviderDescriptor` declares provider ID, transport type, capabilities,
 credential env var, default base URL, settings attribute names, and proxy support.
 
-[providers/runtime/](providers/runtime/) owns the app-scoped provider runtime.
-It validates that descriptors, factories, and supported IDs are in sync, builds
-shared `ProviderConfig`, checks required credentials, creates providers lazily,
-caches them, refreshes model lists, validates configured models, and cleans up
-transports. The package splits factory wiring, config building, provider instance
-cache, model metadata cache, discovery, and validation into separate modules.
+[providers/registry.py](providers/registry.py) owns provider factories and the
+runtime registry. It validates that descriptors, factories, and supported IDs are
+in sync, builds shared `ProviderConfig`, checks required credentials, creates
+providers lazily, caches them, refreshes model lists, and cleans up transports.
 
 [providers/base.py](providers/base.py) defines:
 
@@ -337,22 +312,13 @@ There are two transport families under [providers/transports/](providers/transpo
 - [providers/transports/openai_chat/](providers/transports/openai_chat/)
   implements `OpenAIChatTransport` for providers with OpenAI-compatible
   `/chat/completions` APIs. The package owns the thin transport base,
-  per-request stream runner, OpenAI request policy, OpenAI tool-call assembly,
-  and OpenAI-chat recovery event construction.
+  per-request stream runner, OpenAI tool-call assembly, and OpenAI-chat recovery
+  event construction.
 - [providers/transports/anthropic_messages/](providers/transports/anthropic_messages/)
   implements `AnthropicMessagesTransport` for providers with
   Anthropic-compatible `/messages` APIs. The package owns the thin transport
-  base, native request policy, native stream runner, HTTP response helpers, and
-  native recovery event construction.
-
-Provider request construction mirrors the transport family split. OpenAI-chat
-providers call the OpenAI request policy for Anthropic-to-OpenAI conversion,
-thinking replay selection, `extra_body`, and chat-completion field normalization.
-Native Anthropic providers call the native request policy for raw request
-dumping, default tokens, stream flags, thinking payloads, and `extra_body`
-handling. Concrete provider packages keep only true upstream quirks such as
-Gemini thought signatures, NIM tool-schema aliases and retry downgrades, or
-DeepSeek attachment/tool/thinking compatibility.
+  base, native stream runner, HTTP response helpers, and native recovery event
+  construction.
 
 Shared provider responsibilities include upstream rate limiting, model listing,
 safe error mapping, transport cleanup, thinking/tool handling, retry or recovery
@@ -363,13 +329,11 @@ where supported, and returning Anthropic SSE strings to the service layer.
 1. Add provider metadata to [config/provider_catalog.py](config/provider_catalog.py).
 2. Add credentials and related settings to [config/settings.py](config/settings.py)
    and [.env.example](.env.example) when user configurable.
-3. Add provider metadata to [config/provider_catalog.py](config/provider_catalog.py);
-   Admin UI provider fields are generated from the catalog. Add admin-only help
-   text under [api/admin_config/](api/admin_config/) only when the generated
-   labels/descriptions are insufficient.
+3. Add admin manifest fields in [api/admin_config.py](api/admin_config.py) when
+   the setting should be editable in the Admin UI.
 4. Implement the provider under [providers/](providers/) using the appropriate
    shared transport family.
-5. Add a factory in [providers/runtime/factory.py](providers/runtime/factory.py).
+5. Add a factory in [providers/registry.py](providers/registry.py).
 6. Add deterministic tests under [tests/providers/](tests/providers/) and any
    relevant contract tests.
 7. Add smoke coverage or smoke config in [smoke/](smoke/) when the provider can
@@ -382,25 +346,25 @@ where supported, and returning Anthropic SSE strings to the service layer.
 [core/anthropic/](core/anthropic/) owns Anthropic-side protocol behavior:
 
 - content and message conversion for OpenAI-compatible upstreams;
-- request serialization primitives shared by provider request policies;
 - tool schema and tool-result handling;
 - thinking block handling;
-- stream lifecycle through `core/anthropic/streaming`, including the neutral
-  stream ledger, Anthropic SSE emitter, native event normalization, retry
-  holdback, continuation, and tool repair;
+- SSE event formatting through `SSEBuilder`;
 - native Anthropic stream policy;
+- stream recovery policy, holdback, continuation, and repair helpers;
 - token counting and user-facing error formatting.
 
-Shared stream behavior lives under
-[core/anthropic/streaming/](core/anthropic/streaming/). The shared layer owns the
-Anthropic content-block ledger, SSE serialization, early retry classification,
-holdback buffering, retry attempt counting, common flush/discard behavior,
-midstream continuation, tool JSON repair, and final success/error tails. Provider
-transport packages are upstream adapters: OpenAI-chat providers convert chat
-chunks into ledger operations, and native Anthropic providers parse upstream SSE,
-apply native block policy, and re-emit normalized Anthropic SSE from the shared
-ledger. Transport bases stay focused on provider hooks, client setup, request
-construction, rate limiting, and model listing.
+Shared stream recovery policy lives in
+[core/anthropic/stream_recovery_session.py](core/anthropic/stream_recovery_session.py)
+and [core/anthropic/stream_recovery.py](core/anthropic/stream_recovery.py). The
+shared layer owns early retry classification, holdback buffering, retry attempt
+counting, and common flush/discard behavior. Provider transports still own
+upstream request construction, stream semantic parsing, transport-specific state
+tracking, and the actual recovery SSE events emitted for OpenAI-chat or native
+Anthropic streams. Per-request stream runners in
+[providers/transports/openai_chat/](providers/transports/openai_chat/) and
+[providers/transports/anthropic_messages/](providers/transports/anthropic_messages/)
+own mutable stream state so transport base classes stay focused on provider
+hooks, client setup, and model listing.
 
 [core/openai_responses/](core/openai_responses/) owns OpenAI Responses support:
 
@@ -417,13 +381,11 @@ streaming. Request conversion, stream transformation, Anthropic SSE parsing,
 Responses SSE event formatting, output item construction, tool identity mapping,
 reasoning mapping, ID generation, and error envelope construction each live
 behind the adapter boundary. `stream.py` is the public streaming entrypoint;
-[core/openai_responses/streaming/](core/openai_responses/streaming/) owns the
-block-indexed Responses stream assembler. The package separates Anthropic SSE
-dispatch, block state, output ledger ordering, block completion, SSE event
-builders, and error mapping. API code should depend on the adapter, not on
-those internal module owners directly. Responses output payloads stay
-OpenAI-shaped; Anthropic terminal metadata is used internally only when it
-affects streamed behavior.
+`stream_state.py` owns the block-indexed Responses output ledger used to
+preserve streamed item order, pending block finalization, and terminal response
+lifecycle events. API code should depend on the adapter, not on those internal
+module owners directly. Responses output payloads stay OpenAI-shaped; Anthropic
+terminal metadata is used internally only when it affects streamed behavior.
 
 Responses custom tools are also boundary-owned. The adapter accepts native
 Responses `custom` tool declarations, represents them internally as Anthropic
@@ -462,43 +424,43 @@ common low-value client requests before they reach a provider:
 - suggestion mode;
 - filepath extraction.
 
-The Messages handler runs these only after model routing and after local server-tool
+The service runs these only after model routing and after local server-tool
 handling. Each optimization is controlled by settings flags.
-
-Claude Code auto-mode safety-classifier requests are a message-only routing
-policy, not a short-circuit response. After routing, the Messages handler detects the
-narrow classifier prompt shape and forces thinking off before provider execution
-so Claude Code receives a parser-readable `<block>yes</block>` or
-`<block>no</block>` verdict.
 
 Local `web_search` and `web_fetch` handling lives under
 [api/web_tools/](api/web_tools/). When `ENABLE_WEB_SERVER_TOOLS` is true, the
-Messages handler can stream local Anthropic server-tool responses without sending the
+service can stream local Anthropic server-tool responses without sending the
 request upstream. [api/web_tools/egress.py](api/web_tools/egress.py) enforces URL
 scheme and private-network restrictions for `web_fetch`.
 
 OpenAI-chat upstream providers are identified by
 `ProviderDescriptor.transport_type == "openai_chat"` in
 [config/provider_catalog.py](config/provider_catalog.py). They cannot safely
-represent Anthropic server-tool blocks, so the Messages handler rejects unsupported
+represent Anthropic server-tool blocks, so the service rejects unsupported
 server-tool requests before provider execution instead of performing a lossy
 conversion. Forced `web_search` or `web_fetch` requests are handled locally when
 `ENABLE_WEB_SERVER_TOOLS` is true; otherwise OpenAI-chat upstreams reject them
 and native Anthropic Messages transports may receive them.
 
-## CLI Launchers And Managed Claude
+## CLI Launchers And Client Adapter Boundary
 
-[cli/launchers/claude.py](cli/launchers/claude.py) owns the installed
-`fcc-claude` launcher:
+[cli/adapters/base.py](cli/adapters/base.py) defines `ClientCliAdapter`, the
+boundary for building subprocess commands, building launcher environments,
+parsing stdout lines, and extracting persistent session IDs.
+
+[cli/adapters/claude.py](cli/adapters/claude.py) implements the Claude Code
+adapter:
 
 - `fcc-claude` strips inherited `ANTHROPIC_*` variables, sets
   `ANTHROPIC_BASE_URL`, enables gateway model discovery, configures the
   auto-compact window, and always sets `ANTHROPIC_AUTH_TOKEN`. Blank proxy auth
   becomes the local-only `fcc-no-auth` sentinel so Claude Code reaches the proxy
   instead of stopping at its login gate.
+- Managed task invocations set `ANTHROPIC_API_URL`, `ANTHROPIC_BASE_URL`,
+  gateway model discovery, non-interactive terminal settings, optional
+  `--resume`, optional `--fork-session`, and `--output-format stream-json`.
 
-[cli/launchers/codex.py](cli/launchers/codex.py) owns the installed
-`fcc-codex` launcher:
+[cli/adapters/codex.py](cli/adapters/codex.py) implements the Codex adapter:
 
 - `fcc-codex` strips official OpenAI and Codex credential variables.
 - It creates an ephemeral `fcc` model provider with `wire_api = "responses"` and
@@ -508,119 +470,56 @@ and native Anthropic Messages transports may receive them.
   native `/model` picker lists FCC provider slugs. Catalog generation is
   fail-open: launch continues with a warning if the catalog cannot be prepared.
 - It stores the proxy auth token in `FCC_CODEX_API_KEY` for Codex to read.
+- Managed task invocations use Codex JSON output and map Responses events into
+  the messaging parser event shape.
+- Codex `response.reasoning_text.delta` events are converted into the shared
+  Anthropic-style `thinking_delta` parser shape; summary reasoning events remain
+  raw unless a future feature selects them as the proxy wire shape.
 
-[cli/managed/](cli/managed/) owns managed Claude Code subprocesses used by
-Discord and Telegram messaging. Managed task invocations set
-`ANTHROPIC_API_URL`, `ANTHROPIC_BASE_URL`, gateway model discovery,
-non-interactive terminal settings, optional `--resume`, optional
-`--fork-session`, and `--output-format stream-json`. The managed session parser
-extracts persistent Claude session IDs and yields Claude stream-json events to
-the messaging event parser.
-
-Codex is supported through `fcc-codex` and Codex extensions. FCC does not keep an
-internal managed-Codex session runner because no user-facing messaging setting
-selects Codex for Discord or Telegram.
+[cli/manager.py](cli/manager.py) coordinates multiple `CLISession` instances so
+separate conversations can run in separate client CLI processes while replies
+reuse or fork existing sessions.
 
 ## Messaging Architecture
 
 Messaging is optional. [api/runtime.py](api/runtime.py) calls
-`create_messaging_components()` from
+`create_messaging_platform()` from
 [messaging/platforms/factory.py](messaging/platforms/factory.py) during startup.
 If `MESSAGING_PLATFORM` is `none`, or if the selected platform token is missing,
 the messaging bridge is skipped.
 
-The platform factory returns a `MessagingPlatformComponents` bundle from
-[messaging/platforms/ports.py](messaging/platforms/ports.py): a
-`MessagingRuntime` for lifecycle and inbound callbacks, an `OutboundMessenger`
-for queued sends/edits/deletes, and an optional `VoiceCancellation` port for
-reply-scoped `/clear` during voice transcription. Workflow code depends on
-these ports, not on Telegram or Discord SDK objects.
+[messaging/handler.py](messaging/handler.py) contains `ClaudeMessageHandler`, the
+platform-agnostic orchestration layer. It receives `IncomingMessage` objects,
+dispatches commands, filters its own status messages, creates or extends a
+message tree, queues work, runs a managed client CLI session, parses CLI events,
+updates transcripts, and persists conversation state.
 
-Runtime adapters in
-[messaging/platforms/telegram.py](messaging/platforms/telegram.py) and
-[messaging/platforms/discord.py](messaging/platforms/discord.py) own SDK client
-lifecycle, event subscription, inbound handoff, and voice-note handoff. Inbound
-normalization lives in
-[messaging/platforms/telegram_inbound.py](messaging/platforms/telegram_inbound.py)
-and [messaging/platforms/discord_inbound.py](messaging/platforms/discord_inbound.py).
-Outbound SDK calls live in
-[messaging/platforms/telegram_io.py](messaging/platforms/telegram_io.py) and
-[messaging/platforms/discord_io.py](messaging/platforms/discord_io.py). Shared
-delivery policy lives in [messaging/platforms/outbox.py](messaging/platforms/outbox.py),
-which owns queued send/edit/delete, dedup keys, limiter delegation, and
-fire-and-forget behavior.
-Shared voice-note orchestration lives in
-[messaging/platforms/voice_flow.py](messaging/platforms/voice_flow.py), which owns
-pending voice registration, temp-file cleanup, transcription, cancellation, error
-replies, and the handoff to `IncomingMessage`.
-
-[messaging/workflow.py](messaging/workflow.py) contains `MessagingWorkflow`, the
-platform-agnostic coordinator. It owns dependencies, callback wiring, stop/clear
-side effects, render settings, and shutdown-visible state.
-
-[messaging/turn_intake.py](messaging/turn_intake.py) owns inbound message
-recording, slash command dispatch, status-echo filtering, reply resolution, tree
-creation/extension, initial status messages, persistence, and enqueueing.
-
-[messaging/node_runner.py](messaging/node_runner.py) owns managed CLI session
-lifecycle for queued nodes: parent-session fork/resume, session registration,
-CLI event parsing, transcript/status updates, cancellation, error propagation,
-and session cleanup.
-
-[messaging/event_parser.py](messaging/event_parser.py) normalizes managed Claude
-JSON events into low-level transcript events.
-[messaging/transcript/](messaging/transcript/) owns transcript assembly and
-rendering: open content-block tracking, Task/subagent display state, segment
-models, render context, and truncation. Platform markdown details stay in
-[messaging/rendering/](messaging/rendering/).
-
-[messaging/command_context.py](messaging/command_context.py) defines the typed
-dependency surface for `/stop`, `/clear`, and `/stats`; commands should not
-depend on the concrete workflow object or on platform SDK runtimes.
-
-[messaging/trees/manager.py](messaging/trees/manager.py) preserves
+[messaging/trees/queue_manager.py](messaging/trees/queue_manager.py) preserves
 per-conversation ordering with tree-aware queues. Replies become child nodes, and
 each tree processes one node at a time while separate trees can progress
-independently. [messaging/trees/repository.py](messaging/trees/repository.py)
-owns the in-memory tree/node index, and
-[messaging/trees/processor.py](messaging/trees/processor.py) owns async queue
-processing. [messaging/trees/node.py](messaging/trees/node.py) owns
-`MessageNode` and `MessageState`,
-[messaging/trees/graph.py](messaging/trees/graph.py) owns parent/child and
-status-message lookup state, [messaging/trees/runtime.py](messaging/trees/runtime.py)
-owns locks/current-task/processing state, and
-[messaging/trees/snapshot.py](messaging/trees/snapshot.py) owns typed persisted
-conversation snapshots.
+independently.
 
-[messaging/session/](messaging/session/) persists typed conversation snapshots
-and message IDs to a JSON file under the managed agent workspace.
-`SessionStore` reads existing `sessions.json` files but exposes typed snapshot
-APIs to runtime code. Debounced atomic writes live in
-[messaging/session/persistence.py](messaging/session/persistence.py), and
-per-chat message ID tracking for `/clear` lives in
-[messaging/session/message_log.py](messaging/session/message_log.py).
+[messaging/session.py](messaging/session.py) persists trees, node-to-tree
+mappings, and message IDs to a JSON file under the managed agent workspace. It
+uses debounced atomic writes and flushes pending saves on shutdown.
 
 ```mermaid
 sequenceDiagram
-    participant Runtime as DiscordOrTelegramRuntime
-    participant Outbound as OutboundMessenger
-    participant Workflow as MessagingWorkflow
-    participant Intake as MessagingTurnIntake
+    participant Platform as DiscordOrTelegram
+    participant Handler as ClaudeMessageHandler
     participant Queue as TreeQueueManager
-    participant Runner as MessagingNodeRunner
-    participant Manager as ManagedClaudeSessionManager
-    participant CLI as ClaudeCode
+    participant Manager as CLISessionManager
+    participant CLI as ClientCLI
     participant Proxy as LocalProxy
 
-    Runtime->>Workflow: IncomingMessage
-    Workflow->>Intake: handle inbound turn
-    Intake->>Queue: create or extend message tree
-    Queue->>Runner: process node in order
-    Runner->>Manager: get_or_create_session
+    Platform->>Handler: IncomingMessage
+    Handler->>Queue: create or extend message tree
+    Queue->>Handler: process node in order
+    Handler->>Manager: get_or_create_session
     Manager->>CLI: launch JSON stream task
     CLI->>Proxy: provider-backed API calls
-    CLI-->>Runner: parsed stdout events
-    Runner-->>Outbound: status and transcript updates
+    CLI-->>Handler: parsed stdout events
+    Handler-->>Platform: status and transcript updates
 ```
 
 ## Observability, Diagnostics, And Safety
@@ -688,42 +587,33 @@ when maintainers want branch-level assurance.
 
 1. Add or expose the setting in [config/settings.py](config/settings.py).
 2. Add the template key to [.env.example](.env.example) if users configure it.
-3. Add a `ConfigFieldSpec` under [api/admin_config/](api/admin_config/), or add
-   provider catalog metadata when the setting is provider credential, local URL,
-   proxy, or display-name metadata.
+3. Add a `ConfigFieldSpec` in [api/admin_config.py](api/admin_config.py).
 4. Mark `restart_required` or `session_sensitive` when runtime state cannot be
    updated in place.
 5. Add tests under [tests/api/](tests/api/) or [tests/config/](tests/config/).
 
-### Add Or Change A Client Surface
+### Add A Client Adapter
 
-1. For an installed wrapper, add or update a launcher under
-   [cli/launchers/](cli/launchers/) and keep credential stripping local to that
-   client.
-2. For messaging-managed execution, update [cli/managed/](cli/managed/) only
-   when Discord or Telegram should actually run a different managed client.
-3. Ensure managed task parsing emits the event shapes expected by
+1. Implement the `ClientCliAdapter` protocol from
+   [cli/adapters/base.py](cli/adapters/base.py).
+2. Register selection behavior in [cli/adapters/registry.py](cli/adapters/registry.py).
+3. Ensure launcher env construction strips conflicting upstream credentials.
+4. Ensure managed task parsing emits the event shapes expected by
    [messaging/event_parser.py](messaging/event_parser.py) and
    [messaging/node_event_pipeline.py](messaging/node_event_pipeline.py).
-4. Add launcher, managed-session, and customer-flow tests under
-   [tests/cli/](tests/cli/) and [tests/messaging/](tests/messaging/).
+5. Add CLI adapter and session-manager tests under [tests/cli/](tests/cli/).
 
 ### Add A Messaging Platform
 
-1. Implement a `MessagingRuntime`, `OutboundMessenger`, and inbound normalizer
-   under [messaging/platforms/](messaging/platforms/).
-2. Reuse [messaging/platforms/outbox.py](messaging/platforms/outbox.py) for
-   queued outbound delivery and
-   [messaging/platforms/voice_flow.py](messaging/platforms/voice_flow.py) for
-   voice-note handoff when the platform supports audio.
-3. Add construction logic to
+1. Implement `MessagingPlatform` from
+   [messaging/platforms/base.py](messaging/platforms/base.py).
+2. Add construction logic to
    [messaging/platforms/factory.py](messaging/platforms/factory.py).
-4. Add settings and admin fields for tokens, allowlists, and platform-specific
+3. Add settings and admin fields for tokens, allowlists, and platform-specific
    runtime options.
-5. Add rendering profile support in
+4. Add rendering profile support in
    [messaging/rendering/profiles.py](messaging/rendering/profiles.py) if needed.
-6. Add deterministic runtime/outbound/workflow tests and optional live smoke
-   targets.
+5. Add fake-platform deterministic tests and optional live smoke targets.
 
 ### Add Protocol Behavior
 
@@ -745,7 +635,7 @@ Update this file when a change adds or meaningfully changes:
 - a public route or wire protocol;
 - startup, shutdown, or resource ownership;
 - configuration precedence or managed config behavior;
-- provider runtime, catalog, or transport architecture;
+- provider registry, catalog, or transport architecture;
 - model routing or thinking behavior;
 - CLI adapter behavior;
 - messaging platform behavior;
@@ -755,4 +645,3 @@ Update this file when a change adds or meaningfully changes:
 Docs-only changes to this file do not require a semver bump. Production code
 changes still follow the versioning rules in [AGENTS.md](AGENTS.md) and
 [CLAUDE.md](CLAUDE.md).
-
