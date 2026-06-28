@@ -40,6 +40,29 @@ Free Claude Code routes Anthropic Messages API traffic from Claude Code (CLI and
   <p><em>Codex native <code>/model</code> picker with the generated FCC catalog.</em></p>
 </div>
 
+## Fork Notes
+
+This is a personal fork of [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) maintained as a patchset on top of upstream. We pull from upstream but do not push our changes back. For the unmodified upstream project, visit the [original repo](https://github.com/Alishahryar1/free-claude-code).
+
+> **Need a sync?** Check the [Sync from upstream](#sync-from-upstream-one-way) section in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### What this fork adds
+
+- **OpenRouter ZDR enforcement** — `data_collection=allow` is forced on every OpenRouter request (upstream `openrouter/free` policy). See `providers/openrouter.py`.
+- **MCP meta-router** — bundled `scripts/mcp/` router, CLI launcher, and example config so MCP servers can sit behind the proxy.
+- **`scripts/fcc-launcher.sh`** — convenience wrapper that puts `fcc-server`, `fcc-claude`, and `fcc-codex` on your PATH and launches a tmux session.
+- **Path portability** — bundled scripts derive all paths at runtime: `Path(__file__).resolve().parent` in Python, `cd "$(dirname "$0")" && pwd` in shell, `$HOME`-based derivations in `scripts/fcc-launcher.sh`, and a pure-string-substitution `expand_path()` helper in `scripts/mcp/start_mcp.sh` so example configs can use portable `~/...` placeholders. No host-specific absolute paths are committed.
+
+### Sanitization guarantees
+
+Nothing committed here leaks host identity or real secrets:
+
+- The only `sk_live_*` string in the tree is the placeholder `sk_live_REPLACE_ME` in `.env.example`.
+- No real `Bearer ...` tokens, account IDs, or live keys are committed.
+- Bundled script paths are written portably so the repo works for any user on any machine.
+
+If you fork further, please honour the same contract; details are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Star History
 
 <div align="center">
@@ -639,13 +662,11 @@ CI also enforces a ban on `# type: ignore` / `# ty: ignore` suppressions; `scrip
 
 ## Contributing
 
-This is a fork of [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) with local customisations (OpenRouter ZDR enforcement, MCP meta-router, and minor fixes) merged directly into the repo.
+This is a personal fork; **PRs are not accepted here**. Send bug fixes and broadly-useful patches to [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) instead. If you want to work on this fork locally — including pulling upstream changes or running the CI gates — read [CONTRIBUTING.md](CONTRIBUTING.md), which covers:
 
-- [`.env.example`](.env.example) lists env key names as a read-only reference for contributors; use the **Admin UI** to change managed proxy settings.
-- `scripts/mcp/mcp_config.json` is gitignored — copy `scripts/mcp/mcp_config.example.json` and fill in real secrets.
-- Keep changes small and covered by focused tests.
-- Run the full check sequence before pushing.
-- The syntax `except X, Y` is brought back in python 3.14 final version (not in 3.14 alpha). Keep in mind before opening PRs.
+- the development setup and how to run the five CI checks locally (`./scripts/ci.sh`);
+- the branch-protection rules on `main` (5 required CI checks, no force pushes, admin enforcement on);
+- the sanitization contract for any commit pushed here (no host paths, no real secrets).
 
 ## License
 
