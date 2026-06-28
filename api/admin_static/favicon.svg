@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Free Claude Code</title>
+  <g fill="#E8765C">
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(45 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(90 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(135 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(180 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(225 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(270 32 32)" />
+    <rect x="28" y="4" width="8" height="56" rx="4" ry="4" transform="rotate(315 32 32)" />
+  </g>
+</svg>

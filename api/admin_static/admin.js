@@ -29,6 +29,13 @@ const VIEW_GROUPS = [
     sections: ["messaging", "voice"],
     containerId: "messagingSections",
   },
+  {
+    id: "openrouter_policy",
+    label: "OpenRouter",
+    title: "OpenRouter Policy",
+    sections: ["openrouter_policy"],
+    containerId: "openrouterPolicySections",
+  },
 ];
 
 const byId = (id) => document.getElementById(id);

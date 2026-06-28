@@ -90,6 +90,100 @@ def test_admin_static_hides_managed_source_label():
     assert "sourceEl.textContent = source" in script
 
 
+def test_admin_static_defines_openrouter_policy_view():
+    script = Path("api/admin_static/admin.js").read_text(encoding="utf-8")
+    html = Path("api/admin_static/index.html").read_text(encoding="utf-8")
+
+    assert 'id: "openrouter_policy"' in script
+    assert 'containerId: "openrouterPolicySections"' in script
+    assert 'data-view="openrouter_policy"' in html
+    assert 'id="openrouterPolicySections"' in html
+
+
+def test_admin_static_serves_favicon_svg(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).get("/admin/assets/favicon.svg")
+
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers.get("content-type", "")
+    assert "<svg" in response.text
+
+
+def test_admin_page_links_to_favicon_svg(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).get("/admin")
+
+    assert response.status_code == 200
+    assert (
+        'rel="icon" type="image/svg+xml" href="/admin/assets/favicon.svg"'
+        in response.text
+    )
+
+
+def test_admin_config_exposes_openrouter_policy_section(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).get("/admin/api/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    section_ids = {section["id"] for section in body["sections"]}
+    assert "openrouter_policy" in section_ids
+    moved_keys = {
+        "OPENROUTER_DATA_COLLECTION",
+        "OPENROUTER_FREE_DATA_COLLECTION",
+        "OPENROUTER_FREE_MODEL_IDS",
+    }
+    sections_per_moved_key = {
+        field["key"]: field["section"]
+        for field in body["fields"]
+        if field["key"] in moved_keys
+    }
+    assert set(sections_per_moved_key) == moved_keys
+    assert set(sections_per_moved_key.values()) == {"openrouter_policy"}
+    # OPENROUTER_PROXY is an advanced field that wasn't moved; it stays under providers.
+    proxy_field = next(
+        field for field in body["fields"] if field["key"] == "OPENROUTER_PROXY"
+    )
+    assert proxy_field["section"] == "providers"
+
+
+def test_admin_env_preview_groups_openrouter_policy_keys(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={
+            "values": {
+                "OPENROUTER_DATA_COLLECTION": "deny",
+                "OPENROUTER_FREE_DATA_COLLECTION": "allow",
+                "OPENROUTER_FREE_MODEL_IDS": "deepseek/deepseek-chat:free",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    preview = response.json()["env_preview"]
+    policy_index = preview.index("# OpenRouter Policy")
+    providers_index = preview.index("# Providers")
+    assert providers_index < policy_index
+    for key in (
+        "OPENROUTER_DATA_COLLECTION",
+        "OPENROUTER_FREE_DATA_COLLECTION",
+        "OPENROUTER_FREE_MODEL_IDS",
+    ):
+        assert f"{key}=" in preview
+        assert preview.index(f"{key}=") > policy_index
+
+
 def test_admin_config_masks_secrets_and_exposes_manifest(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

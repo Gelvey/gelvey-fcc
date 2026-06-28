@@ -72,6 +72,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Provider keys, local endpoints, and proxy settings.",
     ),
     ConfigSectionSpec(
+        "openrouter_policy",
+        "OpenRouter Policy",
+        "Per-request data_collection policy and free-model allowlist.",
+    ),
+    ConfigSectionSpec(
         "models",
         "Model Routing",
         "Provider-prefixed models used for Claude model tiers.",
@@ -293,7 +298,7 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "OPENROUTER_DATA_COLLECTION",
         "OpenRouter Data Collection (default)",
-        "providers",
+        "openrouter_policy",
         "select",
         settings_attr="open_router_data_collection",
         default="deny",
@@ -307,7 +312,7 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "OPENROUTER_FREE_DATA_COLLECTION",
         "OpenRouter Data Collection (free models)",
-        "providers",
+        "openrouter_policy",
         "select",
         settings_attr="open_router_free_data_collection",
         default="allow",
@@ -321,7 +326,7 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "OPENROUTER_FREE_MODEL_IDS",
         "OpenRouter Free-Model Allowlist",
-        "providers",
+        "openrouter_policy",
         "textarea",
         settings_attr="open_router_free_model_ids",
         default="",
