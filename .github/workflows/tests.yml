@@ -5,6 +5,11 @@
 
 name: CI
 
+# Least-privilege default for the runner token; overrides default broader
+# repo-token permissions especially during workflow_dispatch reruns.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, master]

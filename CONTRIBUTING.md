@@ -71,7 +71,9 @@ gh api repos/Gelvey/gelvey-fcc/branches/main/protection -X DELETE
 # 2. Push
 git push origin main
 
-# 3. Restore protection
+# 3. Restore protection (note: GitHub requires `required_pull_request_reviews`
+# and `restrictions` to be present in the body — set to `null` if you don't
+# want them enabled).
 gh api repos/Gelvey/gelvey-fcc/branches/main/protection -X PUT --input - <<'JSON'
 {
   "required_status_checks": {
@@ -85,6 +87,8 @@ gh api repos/Gelvey/gelvey-fcc/branches/main/protection -X PUT --input - <<'JSON
     ]
   },
   "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
   "allow_force_pushes": false,
   "allow_deletions": false
 }
@@ -108,9 +112,12 @@ Before each push, run these three greps. Each one ignores `.git/`, `.venv/`, and
 grep -rE '/home/[A-Za-z0-9._-]+(/|\b)' --include='*.py' --include='*.json' --include='*.toml' --include='*.sh' --include='*.md' . \
   | grep -v '\.git/' | grep -v '\.venv/' | grep -v 'CONTRIBUTING\.md' || echo 'CLEAN: no host-specific paths'
 
-# 2. Live API keys (Stripe-shape prefixes; sk_live_, sk_test_, pk_live_, rk_live_, etc.).
+# 2. Live API keys (Stripe-shape prefixes; sk_live_, sk_test_, pk_live_, rk_live_,
+# plus Anthropic sk-ant-…, OpenAI sk-proj-… (legacy sk-… is intentionally
+# excluded to avoid false positives on identifiers), and GitHub PAT shapes
+# ghp_/gho_/ghu_/ghs_/ghr_, etc.).
 # The grep -v strips the documented placeholder in .env.example and this recipe.
-grep -rE '(sk|pk|rk)_(live|test)_[A-Za-z0-9]{8,}' --include='*.py' --include='*.json' --include='*.toml' --include='*.env*' --include='*.md' --include='*.sh' . \
+grep -rE '(sk|pk|rk)_(live|test)_[A-Za-z0-9]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|sk-proj-[A-Za-z0-9_-]{8,}|gh[psoru]_[A-Za-z0-9]{8,}' --include='*.py' --include='*.json' --include='*.toml' --include='*.env*' --include='*.md' --include='*.sh' . \
   | grep -v 'sk_live_REPLACE_ME' | grep -v 'CONTRIBUTING\.md' || echo 'CLEAN: no live API keys'
 
 # 3. Bearer tokens (alphanumeric-leading payload of 8+ chars after "Bearer " + whitespace).
