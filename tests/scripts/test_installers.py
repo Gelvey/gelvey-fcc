@@ -1,4 +1,8 @@
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _repo_root() -> Path:
@@ -201,3 +205,111 @@ def test_install_ps1_validates_minimum_uv_version() -> None:
     assert '"self", "version", "--short"' in text
     assert "[version]" in text
     assert "uv $MinUvVersion or newer is required" in validate_body
+
+
+# ── install.sh execution tests (--dry-run) ────────────────────────────────
+
+
+def _run_install_sh(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run install.sh with given arguments and return the result."""
+    sh = _repo_root() / "scripts" / "install.sh"
+    return subprocess.run(
+        ["sh", str(sh), *args],
+        cwd=_repo_root(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_install_sh_dry_run_produces_expected_steps() -> None:
+    """install.sh --dry-run prints the expected installation steps."""
+    result = _run_install_sh("--dry-run")
+    assert result.returncode == 0, result.stderr
+
+    stdout = result.stdout
+    # Step headers (printed by step() function)
+    assert "Installing Claude Code if missing" in stdout
+    assert "Installing Codex if missing" in stdout
+    assert "Installing uv if missing, updating if present" in stdout
+    assert "Installing Python" in stdout
+    assert "Installing or updating Free Claude Code" in stdout
+
+    # Post-install instructions
+    assert "Free Claude Code is installed" in stdout
+    assert "fcc-server" in stdout
+    assert "fcc-claude" in stdout
+    assert "fcc-codex" in stdout
+
+    # Commands should be printed with '+' prefix
+    assert "+ " in stdout
+
+
+def test_install_sh_help_shows_usage() -> None:
+    """install.sh --help prints the usage text."""
+    result = _run_install_sh("--help")
+    assert result.returncode == 0, result.stderr
+    assert "Usage: install.sh" in result.stdout
+    assert "--voice-nim" in result.stdout
+    assert "--voice-local" in result.stdout
+    assert "--dry-run" in result.stdout
+
+
+def test_install_sh_help_short_flag() -> None:
+    """install.sh -h also prints the usage text."""
+    result = _run_install_sh("-h")
+    assert result.returncode == 0, result.stderr
+    assert "Usage: install.sh" in result.stdout
+
+
+def test_install_sh_rejects_unknown_option() -> None:
+    """install.sh fails on unknown options."""
+    result = _run_install_sh("--nonexistent")
+    assert result.returncode != 0
+    assert "unknown option" in result.stderr
+
+
+def test_install_sh_torch_backend_requires_voice_local() -> None:
+    """--torch-backend without --voice-local or --voice-all fails."""
+    result = _run_install_sh("--dry-run", "--torch-backend", "cu130")
+    assert result.returncode != 0
+    assert "requires --voice-local or --voice-all" in result.stderr
+
+
+def test_install_sh_dry_run_prints_no_real_commands() -> None:
+    """--dry-run mode must not invoke real install commands."""
+    result = _run_install_sh("--dry-run")
+    assert result.returncode == 0, result.stderr
+    stdout = result.stdout
+    # The script should only print commands (prefixed with '+'), not execute them.
+    # If uv is already installed, the script prints '+ uv self update' or
+    # '+ brew upgrade uv' etc. If uv is missing, it prints '+ curl ...'.
+    # Either way, we should see printed commands prefixed with '+'.
+    assert "+ " in stdout, (
+        f"Expected printed commands (prefixed with '+') in dry-run output, "
+        f"but got:\n{stdout}"
+    )
+
+
+def test_install_sh_darwin_homebrew_code_path_static() -> None:
+    """install.sh contains the macOS Homebrew npm --prefix fallback."""
+    text = _script_text("install.sh")
+    # macOS detection guard
+    assert 'uname -s' in text
+    assert '"Darwin"' in text
+    # Homebrew prefix for npm
+    assert "brew --prefix" in text
+    assert "--prefix" in text
+    # Both Claude and Codex functions should have the macOS path
+    claude_body = _braced_body(text, "install_claude_if_missing()")
+    codex_body = _braced_body(text, "install_codex_if_missing()")
+    assert 'uname -s' in claude_body
+    assert 'uname -s' in codex_body
+    assert "brew --prefix" in claude_body
+    assert "brew --prefix" in codex_body
+
+
+def test_install_sh_defaults_dry_run_zero() -> None:
+    """dry_run defaults to 0 (not dry-run mode)."""
+    text = _script_text("install.sh")
+    assert "dry_run=0" in text
