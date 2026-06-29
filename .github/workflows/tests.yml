@@ -1,7 +1,11 @@
 # Branch protection: require every status check this workflow reports, for example:
 #   Ban type ignore suppressions
-#   ruff-format, ruff-check, ty, pytest
-# GitHub may prefix with the workflow name (e.g. "CI / ruff-format"); use the names the branch protection UI offers after a run.
+#   ruff-format (ubuntu-latest), ruff-format (macos-latest)
+#   ruff-check (ubuntu-latest), ruff-check (macos-latest)
+#   ty (ubuntu-latest), ty (macos-latest)
+#   pytest (ubuntu-latest), pytest (macos-latest)
+# GitHub may prefix with the workflow name (e.g. "CI / ruff-format (ubuntu-latest)");
+# use the names the branch protection UI offers after a run.
 
 name: CI
 
@@ -44,15 +48,16 @@ jobs:
           exit 0
 
   quality:
-    name: ${{ matrix.id }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.check.id }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        include:
+        os: [ubuntu-latest, macos-latest]
+        check:
           - id: ruff-format
             run: uv run ruff format --check
           - id: ruff-check
@@ -76,4 +81,4 @@ jobs:
           cache-python: true
 
       - name: Run
-        run: ${{ matrix.run }}
+        run: ${{ matrix.check.run }}
