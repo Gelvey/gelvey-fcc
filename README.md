@@ -50,7 +50,7 @@ This is a personal fork of [Alishahryar1/free-claude-code](https://github.com/Al
 
 - **OpenRouter ZDR enforcement** — `data_collection=allow` is forced on every OpenRouter request (upstream `openrouter/free` policy). See `providers/openrouter.py`.
 - **MCP meta-router** — bundled `scripts/mcp/` router, CLI launcher, and example config so MCP servers can sit behind the proxy.
-- **`scripts/fcc-launcher.sh`** — convenience wrapper that puts `fcc-server`, `fcc-claude`, and `fcc-codex` on your PATH and launches a tmux session.
+- **`scripts/fcc-launcher.sh`** — convenience wrapper that opens a kitty window with tabs for `fcc-server`, `fcc-claude`, and the MCP meta-router (macOS & Linux).
 - **Path portability** — bundled scripts derive all paths at runtime: `Path(__file__).resolve().parent` for in-repo paths (e.g. `scripts/mcp/mcp_router.py`’s config default at line 56), `cd "$(dirname "$0")" && pwd` in shell, and `$HOME`-based derivations in `scripts/fcc-launcher.sh` and `scripts/mcp/start_mcp.sh`’s `~/.mcp-router/` state/pid/log directories, and a pure-string-substitution `expand_path()` helper in `scripts/mcp/start_mcp.sh` so example configs can use portable `~/...` placeholders. No host-specific absolute paths are committed.
 
 ### Sanitization guarantees
@@ -98,32 +98,32 @@ If you fork further, please honour the same contract; details are in [CONTRIBUTI
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh
+curl -fsSL "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh?raw=1" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1" | iex
+irm "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1?raw=1" | iex
 ```
 
-Review the installers at [scripts/install.sh](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh) and [scripts/install.ps1](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1). They install Claude Code and Codex when missing, then install or update the proxy. Re-run these commands to update to the latest version.
+Review the installers at [scripts/install.sh](https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh) and [scripts/install.ps1](https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1). They install Claude Code and Codex when missing, then install or update the proxy. Re-run these commands to update to the latest version.
 
 To remove only Free Claude Code (not uv, Claude Code, Codex, or the uv-managed Python runtime):
 
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/uninstall.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/Gelvey/gelvey-fcc/main/scripts/uninstall.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/uninstall.ps1" | iex
+irm "https://raw.githubusercontent.com/Gelvey/gelvey-fcc/main/scripts/uninstall.ps1" | iex
 ```
 
-Review [scripts/uninstall.sh](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/uninstall.sh) and [scripts/uninstall.ps1](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/uninstall.ps1). They remove the FCC uv tool and always delete `~/.fcc/`. Stop any running `fcc-server`, `fcc-claude`, `fcc-codex`, `fcc-init`, or `free-claude-code` process before uninstalling.
+Review [scripts/uninstall.sh](https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/uninstall.sh) and [scripts/uninstall.ps1](https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/uninstall.ps1). They remove the FCC uv tool and always delete `~/.fcc/`. Stop any running `fcc-server`, `fcc-claude`, `fcc-codex`, `fcc-init`, or `free-claude-code` process before uninstalling.
 
 ### 2. Start The Proxy
 
@@ -538,32 +538,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription (Riva gRPC)
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-nim
+curl -fsSL "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-nim
 
 # Local Whisper (CPU or CUDA)
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local
+curl -fsSL "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-all
+curl -fsSL "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-all
 
 # Local Whisper with CUDA
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription (Riva gRPC)
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1?raw=1"))) -VoiceNim
 
 # Local Whisper (CPU or CUDA)
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1?raw=1"))) -VoiceAll
 
 # Local Whisper with CUDA
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://github.com/Gelvey/gelvey-fcc/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server` after reinstalling.
@@ -612,8 +612,8 @@ free-claude-code/
 Use this path if you are developing or want to run directly from a checkout:
 
 ```bash
-git clone https://github.com/Alishahryar1/free-claude-code.git
-cd free-claude-code
+git clone https://github.com/Gelvey/gelvey-fcc.git
+cd gelvey-fcc
 uv run uvicorn server:app --host 0.0.0.0 --port 8082
 ```
 
