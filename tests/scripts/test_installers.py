@@ -1,8 +1,5 @@
-import os
 import subprocess
 from pathlib import Path
-
-import pytest
 
 
 def _repo_root() -> Path:
@@ -295,7 +292,7 @@ def test_install_sh_darwin_homebrew_code_path_static() -> None:
     """install.sh contains the macOS Homebrew npm --prefix fallback."""
     text = _script_text("install.sh")
     # macOS detection guard
-    assert 'uname -s' in text
+    assert "uname -s" in text
     assert '"Darwin"' in text
     # Homebrew prefix for npm
     assert "brew --prefix" in text
@@ -303,8 +300,8 @@ def test_install_sh_darwin_homebrew_code_path_static() -> None:
     # Both Claude and Codex functions should have the macOS path
     claude_body = _braced_body(text, "install_claude_if_missing()")
     codex_body = _braced_body(text, "install_codex_if_missing()")
-    assert 'uname -s' in claude_body
-    assert 'uname -s' in codex_body
+    assert "uname -s" in claude_body
+    assert "uname -s" in codex_body
     assert "brew --prefix" in claude_body
     assert "brew --prefix" in codex_body
 

@@ -16,11 +16,13 @@ SOCKET="${XDG_RUNTIME_DIR:-/tmp}/fcc-kitty-$$-$(date +%s%N 2>/dev/null || date +
 
 # ── Portable helpers (macOS + Linux) ─────────────────────────────────────────
 # Desktop notification: Linux uses notify-send, macOS uses osascript.
+# pgrep -x Finder guards against headless macOS (CI, servers) where
+# osascript hangs without a window server.
 notify() {
     local urgency="$1" title="$2" body="$3"
     if command -v notify-send >/dev/null 2>&1; then
         notify-send -u "$urgency" "$title" "$body"
-    elif command -v osascript >/dev/null 2>&1; then
+    elif command -v osascript >/dev/null 2>&1 && pgrep -x Finder >/dev/null; then
         # Escape double-quotes and backslashes for AppleScript string literals.
         local escaped_title escaped_body
         escaped_title=$(printf '%s' "$title" | sed 's/\\/\\\\/g; s/"/\\"/g')
