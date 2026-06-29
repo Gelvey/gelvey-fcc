@@ -43,7 +43,12 @@ done
 [ -f "$CONFIG" ] || { echo "FATAL: $CONFIG not found" >&2; exit 1; }
 
 # -- read config ---------------------------------------------------------
-mapfile -t SERVER_NAMES < <(jq -r '.servers | keys[]' "$CONFIG")
+# Portable read of JSON array keys (bash 3.2+ / zsh compatible).
+# mapfile requires bash 4+ (not available on macOS stock bash 3.2).
+SERVER_NAMES=()
+while IFS= read -r line; do
+    SERVER_NAMES+=("$line")
+done < <(jq -r '.servers | keys[]' "$CONFIG")
 SOCKET_PATH=$(jq -r '.router_socket' "$CONFIG")
 ROUTER_PIDFILE=$(jq -r '.router_pidfile' "$CONFIG")
 ROUTER_LOG=$(jq -r '.router_log' "$CONFIG")
@@ -63,6 +68,33 @@ expand_path() {
 SOCKET_PATH=$(expand_path "$SOCKET_PATH")
 ROUTER_PIDFILE=$(expand_path "$ROUTER_PIDFILE")
 ROUTER_LOG=$(expand_path "$ROUTER_LOG")
+
+# Portable timeout: macOS lacks GNU timeout from coreutils.
+# Runs a command with a deadline in seconds. Returns the command's exit
+# code, or 124 (matching GNU timeout convention) on deadline expiry.
+_timeout() {
+    local seconds="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$seconds" "$@"
+        return $?
+    fi
+    # Fallback: run in background, kill after deadline.
+    "$@" &
+    local pid=$!
+    (sleep "$seconds" && kill "$pid" 2>/dev/null) &
+    local killer=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    if kill -0 "$killer" 2>/dev/null; then
+        # Killer still alive → command finished before deadline.
+        kill "$killer" 2>/dev/null
+        wait "$killer" 2>/dev/null
+        return $rc
+    fi
+    # Killer already dead → deadline expired and killed the command.
+    wait "$killer" 2>/dev/null
+    return 124
+}
 
 # -- health-check helpers -----------------------------------------------
 wait_for_health() {
@@ -89,15 +121,22 @@ for name in "${SERVER_NAMES[@]}"; do
         echo "[mcp] $name: type=sse, will connect directly to remote $(jq -r ".servers[\"$name\"].url" "$CONFIG")"
         # No supergateway needed for remote SSE backends.
         host=$(jq -r ".servers[\"$name\"].url" "$CONFIG" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
-        if ! timeout 3 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
+        if ! _timeout 3 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
             echo "[mcp]   warn: cannot reach $host:$port (will fail at activation time)"
         fi
         continue
     fi
 
     cmd=$(jq -r ".servers[\"$name\"].command" "$CONFIG")
-    mapfile -t ARGS < <(jq -r ".servers[\"$name\"].args[]" "$CONFIG")
-    mapfile -t ENV_KV < <(jq -r ".servers[\"$name\"].env // {} | to_entries[] | \"\(.key)=\\(.value)\"" "$CONFIG")
+    # Portable read of JSON arrays (bash 3.2+ / zsh compatible).
+    ARGS=()
+    while IFS= read -r line; do
+        ARGS+=("$line")
+    done < <(jq -r ".servers[\"$name\"].args[]" "$CONFIG")
+    ENV_KV=()
+    while IFS= read -r line; do
+        ENV_KV+=("$line")
+    done < <(jq -r ".servers[\"$name\"].env // {} | to_entries[] | \"\(.key)=\\(.value)\"" "$CONFIG")
 
     # Write env vars to a separate file (no shell-quoting needed) and a
     # wrapper script that sources it then execs the real command. The
@@ -182,7 +221,7 @@ cd "$HOME"
 
 # Wait for the meta-router to bind the socket (it imports MCP SDK + creates
 # listeners, so allow a few seconds).
-for i in $(seq 1 30); do
+for ((i = 1; i <= 30; i++)); do
     if [ -S "$SOCKET_PATH" ] && kill -0 "$ROUTER_PID" 2>/dev/null; then
         break
     fi
@@ -220,7 +259,7 @@ if ! uv run --directory "$SCRIPT_DIR" \
     bash "$STOP_SCRIPT" --quiet || true
     exit 1
 fi
-echo "[mcp] ✅ self-test passed at $(date -Iseconds) (socket=$SOCKET_PATH)."
+echo "[mcp] ✅ self-test passed at $(date -u '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -u '+%Y-%m-%dT%H:%M:%S') (socket=$SOCKET_PATH)."
 echo
 
 # Stay in foreground so the tab stays alive. We block on the meta-

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "2.4.0"
+version = "2.4.1"
 description = "Middleware between Claude Code CLI (Anthropic API) and NVIDIA NIM"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -55,6 +55,9 @@ packages = ["api", "cli", "config", "core", "messaging", "providers"]
 required-version = ">=0.11.0"
 
 [tool.uv.sources]
+# CUDA-only PyTorch index (Linux with NVIDIA GPU).
+# macOS users: remove this block or change to a cpu-only index before
+# running `uv sync --extra voice_local`.
 torch = { index = "pytorch-cu130" }
 
 [[tool.uv.index]]

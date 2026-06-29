@@ -1,5 +1,5 @@
 #!/bin/bash
-# Free Claude Code Launcher (Fedora/kitty edition)
+# Free Claude Code Launcher (macOS / Linux, kitty edition)
 #
 # Opens a kitty window with 3 tabs: MCP Router, FCC Server, FCC Claude.
 # Does a quick git pull on the fork before starting so the local checkout
@@ -8,16 +8,44 @@
 #
 # Requires: kitty, fcc-server, fcc-claude, git, kitten (ships with kitty)
 
-REPO_DIR="/home/$USER/free-claude-code"
+REPO_DIR="$HOME/free-claude-code"
 # Override with FCC_FORK_URL=<url> to track a different remote.
 # Default points to the publicly-published gelvey-fcc fork.
 FORK_URL="${FCC_FORK_URL:-https://github.com/Gelvey/gelvey-fcc}"
-SOCKET="${XDG_RUNTIME_DIR:-/tmp}/fcc-kitty-$$-$(date +%s%N).sock"
+SOCKET="${XDG_RUNTIME_DIR:-/tmp}/fcc-kitty-$$-$(date +%s%N 2>/dev/null || date +%s).sock"
+
+# ── Portable helpers (macOS + Linux) ─────────────────────────────────────────
+# Desktop notification: Linux uses notify-send, macOS uses osascript.
+notify() {
+    local urgency="$1" title="$2" body="$3"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -u "$urgency" "$title" "$body"
+    elif command -v osascript >/dev/null 2>&1; then
+        # Escape double-quotes and backslashes for AppleScript string literals.
+        local escaped_title escaped_body
+        escaped_title=$(printf '%s' "$title" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        escaped_body=$(printf '%s' "$body" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        osascript -e "display notification \"${escaped_body}\" with title \"${escaped_title}\""
+    else
+        echo "[$title] $body" >&2
+    fi
+}
+
+# Bring a window to the front by title.
+activate_window() {
+    if command -v wmctrl >/dev/null 2>&1; then
+        wmctrl -a "$1" 2>/dev/null
+    elif command -v xdotool >/dev/null 2>&1; then
+        xdotool search --name "$1" windowactivate 2>/dev/null
+    elif command -v osascript >/dev/null 2>&1; then
+        osascript -e "tell application \"kitty\" to activate" 2>/dev/null
+    fi
+}
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 for cmd in kitty fcc-server fcc-claude git; do
     if ! command -v "$cmd" &> /dev/null; then
-        notify-send -u critical "FCC Launcher" "Error: '$cmd' is not installed"
+        notify critical "FCC Launcher" "Error: '$cmd' is not installed"
         exit 1
     fi
 done
@@ -27,7 +55,7 @@ MCP_SCRIPT="$REPO_DIR/scripts/mcp/start_mcp.sh"
 if [ -x "$MCP_SCRIPT" ]; then
     for cmd in npx socat jq uv; do
         if ! command -v "$cmd" &> /dev/null; then
-            notify-send -u critical "FCC Launcher" "MCP stack enabled but '$cmd' is not installed"
+            notify critical "FCC Launcher" "MCP stack enabled but '$cmd' is not installed"
             exit 1
         fi
     done
@@ -36,14 +64,14 @@ fi
 # ── Make sure the repo is cloned ──────────────────────────────────────────────
 if [ ! -d "$REPO_DIR" ]; then
     git clone "$FORK_URL" "$REPO_DIR" || {
-        notify-send -u critical "FCC Launcher" "Failed to clone repository"
+        notify critical "FCC Launcher" "Failed to clone repository"
         exit 1
     }
 fi
 
 # ── Quick git pull to stay current (non-blocking — continues on failure) ─────
 cd "$REPO_DIR" || {
-    notify-send -u critical "FCC Launcher" "Cannot cd to $REPO_DIR"
+    notify critical "FCC Launcher" "Cannot cd to $REPO_DIR"
     exit 1
 }
 git pull --ff-only 2>&1 || echo "[fcc] WARNING: git pull failed, continuing with local checkout"
@@ -74,7 +102,7 @@ kitty \
 KITTY_PID=$!
 sleep 1
 if ! kill -0 "$KITTY_PID" 2>/dev/null; then
-    notify-send -u critical "FCC Launcher" "kitty failed to start"
+    notify critical "FCC Launcher" "kitty failed to start"
     exit 1
 fi
 
@@ -130,16 +158,11 @@ if command -v fcc-server >/dev/null 2>&1; then
     TABS_OPENED=$((TABS_OPENED + 1))
 fi
 
-notify-send -u normal "FCC Launcher" \
+notify normal "FCC Launcher" \
     "$TABS_OPENED FCC tab(s) opened (MCP / Server / Claude)" \
-    -i "$HOME/.local/share/icons/hicolor/96x96/apps/claude-logo.png" \
     2>/dev/null || true
 
-{
-    command -v wmctrl >/dev/null && wmctrl -a "FCC" 2>/dev/null
-} || {
-    command -v xdotool >/dev/null && xdotool search --name "FCC" windowactivate 2>/dev/null
-} || true
+activate_window "FCC" || true
 
 echo "FCC tabs opened (MCP / Server / Claude)."
 exit 0

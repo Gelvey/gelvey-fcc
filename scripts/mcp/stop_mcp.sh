@@ -34,8 +34,14 @@ if [ -f "$CONFIG" ]; then
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
                 log "killing supergateway $name (pid $pid)"
                 kill "$pid" 2>/dev/null || true
-                # npx may have spawned a child; reap
-                pkill -P "$pid" 2>/dev/null || true
+                # npx may have spawned children; reap process tree.
+                # pkill -P is a GNU extension; macOS pkill lacks -P.
+                # Use pgrep -P (portable) + kill, with ps fallback.
+                if command -v pgrep >/dev/null 2>&1; then
+                    pgrep -P "$pid" 2>/dev/null | xargs kill 2>/dev/null || true
+                elif command -v ps >/dev/null 2>&1; then
+                    ps -eo pid,ppid 2>/dev/null | awk -v ppid="$pid" '$2==ppid{print $1}' | xargs kill 2>/dev/null || true
+                fi
             fi
             rm -f "$pidfile"
         fi

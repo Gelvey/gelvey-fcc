@@ -206,7 +206,13 @@ install_claude_if_missing() {
     fi
 
     require_command npm
-    run npm install -g @anthropic-ai/claude-code
+    # On macOS with Homebrew node, npm install -g may fail without
+    # --prefix. Auto-detect the global prefix to avoid permission errors.
+    if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+        run npm install -g --prefix "$(brew --prefix)" @anthropic-ai/claude-code
+    else
+        run npm install -g @anthropic-ai/claude-code
+    fi
 }
 
 install_codex_if_missing() {
@@ -216,7 +222,13 @@ install_codex_if_missing() {
     fi
 
     require_command npm
-    run npm install -g @openai/codex
+    # On macOS with Homebrew node, npm install -g may fail without
+    # --prefix. Auto-detect the global prefix to avoid permission errors.
+    if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+        run npm install -g --prefix "$(brew --prefix)" @openai/codex
+    else
+        run npm install -g @openai/codex
+    fi
 }
 
 install_or_update_uv() {
