@@ -1,7 +1,17 @@
 #!/bin/sh
 set -eu
 
-REPO_GIT_URL="git+https://github.com/Alishahryar1/free-claude-code.git"
+# Default upstream install target for the free-claude-code Python package.
+# Can be overridden via FCC_REPO_URL=<git+https url>. When install.sh is
+# executed from inside a git checkout whose `origin` remote is NOT the
+# upstream Alishahryar1/free-claude-code (e.g. inside a fork clone such as
+# Gelvey/gelvey-fcc, which is scripts-only and has no Python package of its
+# own), the installer refuses to silently fall back to upstream — pass
+# FCC_REPO_URL pointing at the fork's free-claude-code Python package
+# (e.g. git+https://github.com/Gelvey/free-claude-code.git).
+DEFAULT_REPO_GIT_URL="git+https://github.com/Alishahryar1/free-claude-code.git"
+REPO_GIT_URL=""
+
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
@@ -25,6 +35,15 @@ Options:
   --torch-backend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   --dry-run                Print commands without running them.
   --help                   Show this help text.
+
+Environment:
+  FCC_REPO_URL=<git+https url>
+      Overrides the install source for the free-claude-code Python package.
+      Required when running from a non-upstream fork clone (otherwise the
+      installer aborts with an error). Mirrors fcc-launcher.sh's
+      FCC_FORK_URL pattern: the same fork owner (e.g. Gelvey) that publishes
+      a scripts fork typically also publishes a free-claude-code Python
+      package fork — point FCC_REPO_URL there.
 USAGE
 }
 
@@ -98,6 +117,59 @@ require_command() {
     if [ "$dry_run" -eq 0 ] && ! command -v "$1" >/dev/null 2>&1; then
         fail "$1 is required. Install it first, then rerun this installer."
     fi
+}
+
+# Resolve the install source for the free-claude-code Python package.
+# Priority (highest first):
+#   1. FCC_REPO_URL env override (always wins; mirrors fcc-launcher.sh's
+#      FCC_FORK_URL pattern so scripts and package sources can be
+#      overridden in one place).
+#   2. Running from inside a git checkout whose `origin` remote is the
+#      upstream Alishahryar1/free-claude-code -> use upstream (preserves
+#      the historical "clone upstream, then run install.sh" UX).
+#   3. Running from inside a git checkout whose `origin` remote is anything
+#      ELSE (i.e. a fork clone such as Gelvey/gelvey-fcc, which is
+#      scripts-only and has no Python package at the repo root) ->
+#      REFUSE silent fallback. Print a clear error pointing at FCC_REPO_URL
+#      so the user does not unknowingly install Alishahryar1's code
+#      instead of their fork.
+#   4. Not inside a git checkout (e.g. `curl ... | sh`) -> use upstream
+#      (preserves the historical "remote pipe-and-install" UX).
+resolve_repo_git_url() {
+    if [ -n "${FCC_REPO_URL:-}" ]; then
+        printf '%s\n' "$FCC_REPO_URL"
+        return 0
+    fi
+
+    # Robust to `curl | sh` invocations where $0 may be a path under /dev
+    # or empty. `cd` failures are swallowed and we fall back to ".".
+    script_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '.')
+
+    if command -v git >/dev/null 2>&1 \
+        && git -C "$script_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        origin_url=$(git -C "$script_dir" config --get remote.origin.url 2>/dev/null || true)
+
+        if [ -n "$origin_url" ]; then
+            case "$origin_url" in
+                *"Alishahryar1/free-claude-code"*)
+                    printf '%s\n' "$DEFAULT_REPO_GIT_URL"
+                    return 0
+                    ;;
+                *)
+                    printf 'error: non-upstream fork clone detected.\n' >&2
+                    printf 'error: git origin: %s\n' "$origin_url" >&2
+                    printf 'error: refusing to silently fall back to the upstream install URL.\n' >&2
+                    printf 'error: this fork has no free-claude-code Python package at the repo root, so it cannot install itself.\n' >&2
+                    printf 'error: re-run with FCC_REPO_URL pointing at the fork that publishes the Python package, e.g.\n' >&2
+                    printf 'error:   FCC_REPO_URL=git+https://github.com/Gelvey/free-claude-code.git sh install.sh\n' >&2
+                    return 1
+                    ;;
+            esac
+        fi
+    fi
+
+    # No git context: treat as the canonical `curl ... | sh` pipeline.
+    printf '%s\n' "$DEFAULT_REPO_GIT_URL"
 }
 
 current_uv_version() {
@@ -336,6 +408,10 @@ install_free_claude_code() {
 
 parse_args "$@"
 validate_args
+
+# Resolve the Free Claude Code Python package install source AFTER argv
+# parsing so --help / --dry-run short-circuits above don't pay this cost.
+REPO_GIT_URL=$(resolve_repo_git_url) || exit 1
 
 step "Installing Claude Code if missing"
 install_claude_if_missing

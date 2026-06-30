@@ -12,7 +12,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RepoGitUrl = "git+https://github.com/Alishahryar1/free-claude-code.git"
+# Default upstream install target for the free-claude-code Python package.
+# Can be overridden via $env:FCC_REPO_URL. When install.ps1 is executed
+# from inside a git checkout whose `origin` remote is NOT the upstream
+# Alishahryar1/free-claude-code (e.g. inside a fork clone such as
+# Gelvey/gelvey-fcc, which is scripts-only and has no Python package of
+# its own), the installer refuses to silently fall back to upstream —
+# pass $env:FCC_REPO_URL pointing at the fork's free-claude-code Python
+# package (e.g. git+https://github.com/Gelvey/free-claude-code.git).
+$DefaultRepoGitUrl = "git+https://github.com/Alishahryar1/free-claude-code.git"
+
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
@@ -30,6 +39,15 @@ Options:
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
+
+Environment:
+  `$env:FCC_REPO_URL = '<git+https url>'
+      Overrides the install source for the free-claude-code Python package.
+      Required when running from a non-upstream fork clone (otherwise the
+      installer aborts with an error). Mirrors fcc-launcher.sh's
+      FCC_FORK_URL pattern: the same fork owner (e.g. Gelvey) that publishes
+      a scripts fork typically also publishes a free-claude-code Python
+      package fork — point `$env:FCC_REPO_URL there.
 "@
 }
 
@@ -282,6 +300,63 @@ function Update-ExistingUv {
     throw "uv $MinUvVersion or newer is required; found uv $version. The existing uv install source was not detected. Upgrade uv manually with the package manager that installed it, then rerun this installer."
 }
 
+# Resolve the install source for the free-claude-code Python package.
+# Priority (highest first):
+#   1. $env:FCC_REPO_URL override (always wins; mirrors fcc-launcher.sh's
+#      FCC_FORK_URL pattern so scripts and package sources can be
+#      overridden in one place).
+#   2. Inside a git checkout whose `origin` remote is the upstream
+#      Alishahryar1/free-claude-code -> use upstream (preserves the
+#      historical "clone upstream, then run install.ps1" UX).
+#   3. Inside a git checkout whose `origin` remote is anything ELSE
+#      (i.e. a fork clone such as Gelvey/gelvey-fcc, which is scripts-only
+#      and has no Python package at the repo root) -> REFUSE silent
+#      fallback. Print a clear error pointing at $env:FCC_REPO_URL so the
+#      user does not unknowingly install Alishahryar1's code instead of
+#      their fork.
+#   4. Not inside a git checkout (e.g. `irm ... | iex`) -> use upstream
+#      (preserves the historical "remote pipe-and-install" UX).
+function Resolve-RepoGitUrl {
+    if (-not [string]::IsNullOrWhiteSpace($env:FCC_REPO_URL)) {
+        return $env:FCC_REPO_URL
+    }
+
+    $scriptInfo = $MyInvocation.MyCommand.Path
+    $scriptDirectory = if ($scriptInfo) { Split-Path -Parent $scriptInfo } else { "." }
+    try {
+        $scriptDirectory = (Resolve-Path -LiteralPath $scriptDirectory -ErrorAction Stop).ProviderPath
+    } catch {
+        $scriptDirectory = "."
+    }
+
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $insideWorkTree = Invoke-ProbeCommand -FilePath "git" -Arguments @(
+            "-C", $scriptDirectory, "rev-parse", "--is-inside-work-tree"
+        )
+        if ($insideWorkTree.ExitCode -eq 0) {
+            $originProbe = Invoke-ProbeCommand -FilePath "git" -Arguments @(
+                "-C", $scriptDirectory, "config", "--get", "remote.origin.url"
+            )
+            $originUrl = if ($originProbe.ExitCode -eq 0) { $originProbe.Output.Trim() } else { "" }
+
+            if (-not [string]::IsNullOrWhiteSpace($originUrl)) {
+                if ($originUrl -match "Alishahryar1/free-claude-code") {
+                    return $DefaultRepoGitUrl
+                }
+                [Console]::Error.WriteLine("error: non-upstream fork clone detected.")
+                [Console]::Error.WriteLine("error: git origin: $originUrl")
+                [Console]::Error.WriteLine("error: refusing to silently fall back to the upstream install URL.")
+                [Console]::Error.WriteLine("error: this fork has no Python package at the repo root, so it cannot install itself.")
+                [Console]::Error.WriteLine("error: re-run with `$env:FCC_REPO_URL pointing at the fork that publishes the Python package, e.g.")
+                [Console]::Error.WriteLine("error:   `$env:FCC_REPO_URL = 'git+https://github.com/Gelvey/free-claude-code.git'")
+                throw "non-upstream clone detected; FCC_REPO_URL is required"
+            }
+        }
+    }
+
+    return $DefaultRepoGitUrl
+}
+
 function Install-ClaudeIfMissing {
     if (Get-Command claude -ErrorAction SilentlyContinue) {
         Write-Host "Claude Code already found on PATH; skipping install."
@@ -374,6 +449,11 @@ if ($RemainingArgs.Count -gt 0) {
 if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not ($VoiceLocal -or $VoiceAll))) {
     throw "-TorchBackend requires -VoiceLocal or -VoiceAll."
 }
+
+# Resolve AFTER argv parsing (so -Help and bad-arg throws above exit first)
+# and BEFORE any side-effectful step (claude/codex/uv) so a fork-context
+# error aborts cleanly without touching the user's system.
+$RepoGitUrl = Resolve-RepoGitUrl
 
 Write-Step "Installing Claude Code if missing"
 Install-ClaudeIfMissing
