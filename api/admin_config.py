@@ -257,6 +257,33 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "CLOUDFLARE_AI_API_KEY",
+        "Cloudflare Workers AI API Key",
+        "providers",
+        "secret",
+        settings_attr="cloudflare_ai_api_key",
+        secret=True,
+        description=(
+            "Cloudflare Workers AI API token from "
+            "[dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens). "
+            "Pair with ``CLOUDFLARE_AI_ACCOUNT_ID`` (dashboard sidebar). Free tier: "
+            "10,000 neurons/day reset at 00:00 UTC."
+        ),
+    ),
+    ConfigFieldSpec(
+        "CLOUDFLARE_AI_ACCOUNT_ID",
+        "Cloudflare Workers AI Account ID",
+        "providers",
+        "secret",
+        settings_attr="cloudflare_ai_account_id",
+        secret=True,
+        description=(
+            "Cloudflare account id used in the upstream URL path "
+            "(``/client/v4/accounts/<id>/ai/v1/chat/completions``). Find it in "
+            "the Cloudflare dashboard right sidebar or via the Cloudflare API."
+        ),
+    ),
+    ConfigFieldSpec(
         "LM_STUDIO_BASE_URL",
         "LM Studio Base URL",
         "providers",
@@ -453,6 +480,28 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "providers",
         "secret",
         settings_attr="cerebras_proxy",
+        secret=True,
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "CLOUDFLARE_AI_BASE_URL",
+        "Cloudflare Workers AI Base URL",
+        "providers",
+        settings_attr="cloudflare_ai_base_url",
+        default="",
+        advanced=True,
+        description=(
+            "Optional full URL override for proxies, mocks, or self-hosted "
+            "gateways. Empty falls back to the composed "
+            "``https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1``."
+        ),
+    ),
+    ConfigFieldSpec(
+        "CLOUDFLARE_AI_PROXY",
+        "Cloudflare Workers AI Proxy",
+        "providers",
+        "secret",
+        settings_attr="cloudflare_ai_proxy",
         secret=True,
         advanced=True,
     ),
@@ -943,6 +992,12 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "FCC_SMOKE_MODEL_CEREBRAS",
         "Smoke Cerebras Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_CLOUDFLARE_AI",
+        "Smoke Cloudflare Workers AI Model",
         "smoke",
         advanced=True,
     ),

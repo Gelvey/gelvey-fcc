@@ -12,15 +12,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Default upstream install target for the free-claude-code Python package.
+# Default install target for the free-claude-code Python package.
 # Can be overridden via $env:FCC_REPO_URL. When install.ps1 is executed
-# from inside a git checkout whose `origin` remote is NOT the upstream
-# Alishahryar1/free-claude-code (e.g. inside a fork clone such as
-# Gelvey/gelvey-fcc, which is scripts-only and has no Python package of
-# its own), the installer refuses to silently fall back to upstream —
-# pass $env:FCC_REPO_URL pointing at the fork's free-claude-code Python
-# package (e.g. git+https://github.com/Gelvey/free-claude-code.git).
-$DefaultRepoGitUrl = "git+https://github.com/Alishahryar1/free-claude-code.git"
+# from inside a git checkout whose `origin` remote is NOT
+# Gelvey/gelvey-fcc, the installer refuses to silently fall back to the
+# canonical URL — pass $env:FCC_REPO_URL pointing at the fork that
+# publishes the Python package.
+$DefaultRepoGitUrl = "git+https://github.com/Gelvey/gelvey-fcc.git"
 
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
@@ -305,17 +303,14 @@ function Update-ExistingUv {
 #   1. $env:FCC_REPO_URL override (always wins; mirrors fcc-launcher.sh's
 #      FCC_FORK_URL pattern so scripts and package sources can be
 #      overridden in one place).
-#   2. Inside a git checkout whose `origin` remote is the upstream
-#      Alishahryar1/free-claude-code -> use upstream (preserves the
-#      historical "clone upstream, then run install.ps1" UX).
+#   2. Inside a git checkout whose `origin` remote is Gelvey/gelvey-fcc
+#      -> use the canonical URL.
 #   3. Inside a git checkout whose `origin` remote is anything ELSE
-#      (i.e. a fork clone such as Gelvey/gelvey-fcc, which is scripts-only
-#      and has no Python package at the repo root) -> REFUSE silent
-#      fallback. Print a clear error pointing at $env:FCC_REPO_URL so the
-#      user does not unknowingly install Alishahryar1's code instead of
-#      their fork.
-#   4. Not inside a git checkout (e.g. `irm ... | iex`) -> use upstream
-#      (preserves the historical "remote pipe-and-install" UX).
+#      (i.e. a different fork) -> REFUSE silent fallback. Print a clear
+#      error pointing at $env:FCC_REPO_URL so the user does not
+#      unknowingly install a different repo's code.
+#   4. Not inside a git checkout (e.g. `irm ... | iex`) -> use canonical
+#      URL.
 function Resolve-RepoGitUrl {
     if (-not [string]::IsNullOrWhiteSpace($env:FCC_REPO_URL)) {
         return $env:FCC_REPO_URL
@@ -340,16 +335,15 @@ function Resolve-RepoGitUrl {
             $originUrl = if ($originProbe.ExitCode -eq 0) { $originProbe.Output.Trim() } else { "" }
 
             if (-not [string]::IsNullOrWhiteSpace($originUrl)) {
-                if ($originUrl -match "Alishahryar1/free-claude-code") {
+                if ($originUrl -match "Gelvey/gelvey-fcc") {
                     return $DefaultRepoGitUrl
                 }
-                [Console]::Error.WriteLine("error: non-upstream fork clone detected.")
+                [Console]::Error.WriteLine("error: non-canonical fork clone detected.")
                 [Console]::Error.WriteLine("error: git origin: $originUrl")
-                [Console]::Error.WriteLine("error: refusing to silently fall back to the upstream install URL.")
-                [Console]::Error.WriteLine("error: this fork has no Python package at the repo root, so it cannot install itself.")
+                [Console]::Error.WriteLine("error: refusing to silently fall back to the canonical install URL.")
                 [Console]::Error.WriteLine("error: re-run with `$env:FCC_REPO_URL pointing at the fork that publishes the Python package, e.g.")
-                [Console]::Error.WriteLine("error:   `$env:FCC_REPO_URL = 'git+https://github.com/Gelvey/free-claude-code.git'")
-                throw "non-upstream clone detected; FCC_REPO_URL is required"
+                [Console]::Error.WriteLine("error:   `$env:FCC_REPO_URL = 'git+https://github.com/YourUser/your-fork.git'")
+                throw "non-canonical clone detected; FCC_REPO_URL is required"
             }
         }
     }

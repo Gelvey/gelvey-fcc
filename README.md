@@ -7,7 +7,7 @@ Use Claude Code CLI, Codex CLI, their VS Code extensions, JetBrains ACP, or chat
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge)](https://github.com/astral-sh/uv)
-[![Tested with Pytest](https://img.shields.io/badge/testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/Alishahryar1/free-claude-code/actions/workflows/tests.yml)
+[![Tested with Pytest](https://img.shields.io/badge/testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/Gelvey/gelvey-fcc/actions/workflows/tests.yml)
 [![Type checking: Ty](https://img.shields.io/badge/type%20checking-ty-ffcc00.svg?style=for-the-badge)](https://pypi.org/project/ty/)
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
@@ -42,7 +42,7 @@ Free Claude Code routes Anthropic Messages API traffic from Claude Code (CLI and
 
 ## Fork Notes
 
-This is a personal fork of [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) maintained as a patchset on top of upstream. We pull from upstream but do not push our changes back. For the unmodified upstream project, visit the [original repo](https://github.com/Alishahryar1/free-claude-code).
+This is a personal fork of [Gelvey/gelvey-fcc](https://github.com/Gelvey/gelvey-fcc) maintained as a patchset on top of upstream. We pull from upstream but do not push our changes back. For the unmodified upstream project, visit the [original repo](https://github.com/Gelvey/gelvey-fcc).
 
 > **Need a sync?** Check the [Sync from upstream](#sync-from-upstream-one-way) section in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -66,11 +66,11 @@ If you fork further, please honour the same contract; details are in [CONTRIBUTI
 ## Star History
 
 <div align="center">
-  <a href="https://star-history.com/#Alishahryar1/free-claude-code&Date">
+  <a href="https://star-history.com/#Gelvey/gelvey-fcc&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date">
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date" width="700">
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Gelvey/gelvey-fcc&type=Date&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Gelvey/gelvey-fcc&type=Date">
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Gelvey/gelvey-fcc&type=Date" width="700">
     </picture>
   </a>
 </div>
@@ -80,7 +80,7 @@ If you fork further, please honour the same contract; details are in [CONTRIBUTI
 - Drop-in proxy for Claude Code's Anthropic API calls (`/v1/messages`, `/v1/models`).
 - Drop-in proxy for Codex via the OpenAI Responses API (`/v1/responses`).
 - `fcc-claude` and `fcc-codex` launchers that read the current Admin UI port and auth token each time they start.
-- 17 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
+- 18 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Cloudflare Workers AI, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
 - Per-model routing for Claude Code: send Opus, Sonnet, Haiku, and fallback traffic to different providers.
 - Native Claude Code `/model` picker support through the proxy's `/v1/models` endpoint (see [Model Picker](#model-picker)).
 - Native Codex `/model` picker support when launched through `fcc-codex`, using a generated local model catalog.
@@ -299,7 +299,23 @@ This provider calls Kimi's **Anthropic-compatible** Messages API (`https://api.m
 
 Browse models at [platform.moonshot.ai](https://platform.moonshot.ai).
 
-### 11. [Cerebras Inference](https://inference-docs.cerebras.ai/quickstart)
+### 11. [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/)
+
+Cloudflare exposes an OpenAI-compatible Chat Completions endpoint at
+`https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1/chat/completions`.
+
+In the Admin UI, paste your token into `CLOUDFLARE_AI_API_KEY` ([Cloudflare API tokens](https://dash.cloudflare.com/profile/api-tokens)) and your **account id** into `CLOUDFLARE_AI_ACCOUNT_ID` (Cloudflare dashboard right sidebar). Then set `MODEL` to a `@cf/` slug such as `cloudflare_ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+
+The OpenAI-compat layer advertises no `/models` endpoint, so FCC ships a curated list of free Workers AI chat models that work well for coding/agent workloads:
+
+- `cloudflare_ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`
+- `cloudflare_ai/@cf/meta/llama-3.1-8b-instruct`
+- `cloudflare_ai/@cf/qwen/qwen2.5-coder-32b-instruct`
+- `cloudflare_ai/@cf/mistralai/mistral-small-3.1-24b-instruct`
+
+The free tier is **10,000 neurons/day** reset at 00:00 UTC (larger models consume more neurons per request; 32B-class models can exhaust the budget quickly). For self-hosted gateways or mocks, set `CLOUDFLARE_AI_BASE_URL` to a full URL — when set it bypasses the per-account URL composition. Browse the full model catalog at [developers.cloudflare.com/workers-ai/models](https://developers.cloudflare.com/workers-ai/models/).
+
+### 12. [Cerebras Inference](https://inference-docs.cerebras.ai/quickstart)
 
 Sign up and create an API key in the [Cerebras Cloud Console](https://cloud.cerebras.ai) (see [Quickstart](https://inference-docs.cerebras.ai/quickstart)).
 
@@ -307,7 +323,7 @@ In the Admin UI, set `CEREBRAS_API_KEY`, then route with `MODEL` such as `cerebr
 
 Cerebras exposes an OpenAI-compatible API at `https://api.cerebras.ai/v1` ([OpenAI compatibility](https://inference-docs.cerebras.ai/resources/openai)). Non-standard request fields should go in `extra_body` when using the OpenAI client; see the same page. For reasoning models and parameters, see [Reasoning](https://inference-docs.cerebras.ai/capabilities/reasoning). This proxy follows other OpenAI-compat adapters for thinking via `reasoning_content` when Claude-style thinking is enabled.
 
-### 12. [Groq](https://console.groq.com/)
+### 13. [Groq](https://console.groq.com/)
 
 Get an API key at [console.groq.com/keys](https://console.groq.com/keys).
 
@@ -319,7 +335,7 @@ Reasoning-heavy models expose extra knobs documented under [Groq reasoning](http
 
 Browse models at [console.groq.com/docs/models](https://console.groq.com/docs/models).
 
-### 13. [Fireworks AI](https://fireworks.ai/)
+### 14. [Fireworks AI](https://fireworks.ai/)
 
 Get an API key at [fireworks.ai/account/api-keys](https://fireworks.ai/account/api-keys).
 
@@ -329,7 +345,7 @@ Fireworks exposes an **Anthropic-compatible** Messages API at `https://api.firew
 
 Browse models at [fireworks.ai/models](https://fireworks.ai/models).
 
-### 14. [Z.ai](https://z.ai/)
+### 15. [Z.ai](https://z.ai/)
 
 Get an API key at [Z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list).
 
@@ -344,13 +360,13 @@ Popular examples:
 
 Browse models at [Z.ai](https://z.ai).
 
-### 15. [LM Studio](https://lmstudio.ai/)
+### 16. [LM Studio](https://lmstudio.ai/)
 
 Start LM Studio's local server and load a model. In the Admin UI, keep or update `LM_STUDIO_BASE_URL`, then set `MODEL` to the model identifier shown by LM Studio, prefixed with `lmstudio/`.
 
 Prefer models with tool-use support for Claude Code workflows.
 
-### 16. [llama.cpp](https://github.com/ggml-org/llama.cpp)
+### 17. [llama.cpp](https://github.com/ggml-org/llama.cpp)
 
 Start `llama-server` with an Anthropic-compatible `/v1/messages` endpoint and enough context for Claude Code requests.
 
@@ -358,7 +374,7 @@ In the Admin UI, keep or update `LLAMACPP_BASE_URL`, then set `MODEL` to the loc
 
 For local coding models, context size matters. If llama.cpp returns HTTP 400 for normal Claude Code requests, increase `--ctx-size` and verify the model/server build supports the requested features.
 
-### 17. [Ollama](https://ollama.com/)
+### 18. [Ollama](https://ollama.com/)
 
 Run Ollama and pull a model:
 
@@ -662,7 +678,7 @@ CI also enforces a ban on `# type: ignore` / `# ty: ignore` suppressions; `scrip
 
 ## Contributing
 
-This is a personal fork; **PRs are not accepted here**. Send bug fixes and broadly-useful patches to [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) instead. If you want to work on this fork locally — including pulling upstream changes or running the CI gates — read [CONTRIBUTING.md](CONTRIBUTING.md), which covers:
+This is a personal fork; **PRs are not accepted here**. Send bug fixes and broadly-useful patches to [Gelvey/gelvey-fcc](https://github.com/Gelvey/gelvey-fcc) instead. If you want to work on this fork locally — including pulling upstream changes or running the CI gates — read [CONTRIBUTING.md](CONTRIBUTING.md), which covers:
 
 - the development setup and how to run the five CI checks locally (`./scripts/ci.sh`);
 - the branch-protection rules on `main` (5 required CI checks, no force pushes, admin enforcement on);

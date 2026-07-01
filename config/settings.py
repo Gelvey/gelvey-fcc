@@ -135,6 +135,23 @@ class Settings(BaseSettings):
     # ==================== Cerebras Inference (OpenAI-compatible) ====================
     cerebras_api_key: str = Field(default="", validation_alias="CEREBRAS_API_KEY")
 
+    # ==================== Cloudflare Workers AI (OpenAI-compatible) ====================
+    # Bearer token from https://dash.cloudflare.com/profile/api-tokens.
+    cloudflare_ai_api_key: str = Field(
+        default="", validation_alias="CLOUDFLARE_AI_API_KEY"
+    )
+    # Account ID is part of the upstream URL path; find it in the Cloudflare
+    # dashboard right sidebar or via ``wrangler``/API. The factory substitutes
+    # this into ``CLOUDFLARE_AI_DEFAULT_BASE`` at provider init time.
+    cloudflare_ai_account_id: str = Field(
+        default="", validation_alias="CLOUDFLARE_AI_ACCOUNT_ID"
+    )
+    # Optional full URL override for proxies, mocks, or self-hosted gateways.
+    # Empty falls back to the composed ``...accounts/<account_id>/ai/v1`` URL.
+    cloudflare_ai_base_url: str = Field(
+        default="", validation_alias="CLOUDFLARE_AI_BASE_URL"
+    )
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -195,6 +212,7 @@ class Settings(BaseSettings):
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
+    cloudflare_ai_proxy: str = Field(default="", validation_alias="CLOUDFLARE_AI_PROXY")
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")

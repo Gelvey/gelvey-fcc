@@ -136,6 +136,29 @@ def _create_cerebras(config: ProviderConfig, _settings: Settings) -> BaseProvide
     return CerebrasProvider(config)
 
 
+def _create_cloudflare_ai(config: ProviderConfig, settings: Settings) -> BaseProvider:
+    """Build a Cloudflare Workers AI provider and resolve its per-account base URL."""
+    from providers.cloudflare_ai import CloudflareAiProvider
+    from providers.defaults import CLOUDFLARE_AI_DEFAULT_BASE
+    from providers.exceptions import AuthenticationError
+
+    raw_base_url = config.base_url or CLOUDFLARE_AI_DEFAULT_BASE
+    if "CLOUDFLARE_AI_ACCOUNT_ID" in raw_base_url:
+        account_id = settings.cloudflare_ai_account_id.strip()
+        if not account_id:
+            raise AuthenticationError(
+                "CLOUDFLARE_AI_ACCOUNT_ID is not set. Add it to your .env file. "
+                "Find your account ID in the Cloudflare dashboard right sidebar "
+                "or via the Cloudflare API."
+            )
+        resolved_url = raw_base_url.replace("CLOUDFLARE_AI_ACCOUNT_ID", account_id)
+    else:
+        resolved_url = raw_base_url
+
+    composed_config = config.model_copy(update={"base_url": resolved_url})
+    return CloudflareAiProvider(composed_config)
+
+
 PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "nvidia_nim": _create_nvidia_nim,
     "open_router": _create_open_router,
@@ -148,6 +171,7 @@ PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "wafer": _create_wafer,
     "kimi": _create_kimi,
     "cerebras": _create_cerebras,
+    "cloudflare_ai": _create_cloudflare_ai,
     "groq": _create_groq,
     "fireworks": _create_fireworks,
     "zai": _create_zai,

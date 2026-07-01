@@ -1,6 +1,6 @@
 # Contributing to `Gelvey/gelvey-fcc`
 
-This is a personal fork of [`Alishahryar1/free-claude-code`](https://github.com/Alishahryar1/free-claude-code). Pull requests are **not accepted on this fork**; please open bug fixes and broadly-useful patches against the upstream repo instead. This document covers how to work with this fork locally if you maintain it or mirror it.
+This is a personal fork of [`Gelvey/gelvey-fcc`](https://github.com/Gelvey/gelvey-fcc). Pull requests are **not accepted on this fork**; please open bug fixes and broadly-useful patches against the upstream repo instead. This document covers how to work with this fork locally if you maintain it or mirror it.
 
 ## Development setup
 
@@ -9,7 +9,7 @@ Clone the fork with the upstream remote preserved so you can sync from upstream:
 ```bash
 git clone https://github.com/Gelvey/gelvey-fcc.git
 cd gelvey-fcc
-git remote add upstream https://github.com/Alishahryar1/free-claude-code.git
+git remote add upstream https://github.com/Gelvey/gelvey-fcc.git
 git fetch upstream
 ```
 
@@ -103,7 +103,7 @@ Anything you commit to this fork must remain portable and free of secrets:
 
 - **No host-specific absolute paths** — use `Path(__file__).resolve().parent` in Python, `cd "$(dirname "$0")" && pwd` in shell, `$HOME` derivatives in launchers, or a pure-string-substitution `expand_path()` helper (no `eval`) like the one in `scripts/mcp/start_mcp.sh`. Example configs should use portable `~/...` placeholders.
 - **No real API keys, tokens, or secrets** — only obvious placeholders such as `sk_live_REPLACE_ME` are allowed. Real `sk_live_*`, `sk_test_*`, `pk_live_*`, `rk_live_*`, `Bearer ...`, refresh tokens, account IDs, etc. must never land in a commit.
-- **Public URLs only** — example SSH/SCP/URL strings should reference the public fork URL (`https://github.com/Gelvey/gelvey-fcc.git`) or upstream (`https://github.com/Alishahryar1/free-claude-code.git`), not private workspaces.
+- **Public URLs only** — example SSH/SCP/URL strings should reference the public fork URL (`https://github.com/Gelvey/gelvey-fcc.git`) or upstream (`https://github.com/Gelvey/gelvey-fcc.git`), not private workspaces.
 
 Before each push, run these three greps. Each one ignores `.git/`, `.venv/`, and `CONTRIBUTING.md` itself (which legitimately contains the example patterns and grep recipes) so any remaining match is a real leak:
 

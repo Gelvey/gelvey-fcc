@@ -1,15 +1,13 @@
 #!/bin/sh
 set -eu
 
-# Default upstream install target for the free-claude-code Python package.
+# Default install target for the free-claude-code Python package.
 # Can be overridden via FCC_REPO_URL=<git+https url>. When install.sh is
-# executed from inside a git checkout whose `origin` remote is NOT the
-# upstream Alishahryar1/free-claude-code (e.g. inside a fork clone such as
-# Gelvey/gelvey-fcc, which is scripts-only and has no Python package of its
-# own), the installer refuses to silently fall back to upstream — pass
-# FCC_REPO_URL pointing at the fork's free-claude-code Python package
-# (e.g. git+https://github.com/Gelvey/free-claude-code.git).
-DEFAULT_REPO_GIT_URL="git+https://github.com/Alishahryar1/free-claude-code.git"
+# executed from inside a git checkout whose `origin` remote is NOT
+# Gelvey/gelvey-fcc, the installer refuses to silently fall back to the
+# canonical URL — pass FCC_REPO_URL pointing at the fork that publishes
+# the Python package.
+DEFAULT_REPO_GIT_URL="git+https://github.com/Gelvey/gelvey-fcc.git"
 REPO_GIT_URL=""
 
 PYTHON_VERSION="3.14.0"
@@ -124,17 +122,13 @@ require_command() {
 #   1. FCC_REPO_URL env override (always wins; mirrors fcc-launcher.sh's
 #      FCC_FORK_URL pattern so scripts and package sources can be
 #      overridden in one place).
-#   2. Running from inside a git checkout whose `origin` remote is the
-#      upstream Alishahryar1/free-claude-code -> use upstream (preserves
-#      the historical "clone upstream, then run install.sh" UX).
+#   2. Running from inside a git checkout whose `origin` remote is
+#      Gelvey/gelvey-fcc -> use the canonical URL.
 #   3. Running from inside a git checkout whose `origin` remote is anything
-#      ELSE (i.e. a fork clone such as Gelvey/gelvey-fcc, which is
-#      scripts-only and has no Python package at the repo root) ->
-#      REFUSE silent fallback. Print a clear error pointing at FCC_REPO_URL
-#      so the user does not unknowingly install Alishahryar1's code
-#      instead of their fork.
-#   4. Not inside a git checkout (e.g. `curl ... | sh`) -> use upstream
-#      (preserves the historical "remote pipe-and-install" UX).
+#      ELSE (i.e. a different fork) -> REFUSE silent fallback. Print a clear
+#      error pointing at FCC_REPO_URL so the user does not unknowingly
+#      install a different repo's code.
+#   4. Not inside a git checkout (e.g. `curl ... | sh`) -> use canonical URL.
 resolve_repo_git_url() {
     if [ -n "${FCC_REPO_URL:-}" ]; then
         printf '%s\n' "$FCC_REPO_URL"
@@ -151,17 +145,16 @@ resolve_repo_git_url() {
 
         if [ -n "$origin_url" ]; then
             case "$origin_url" in
-                *"Alishahryar1/free-claude-code"*)
+                *"Gelvey/gelvey-fcc"*)
                     printf '%s\n' "$DEFAULT_REPO_GIT_URL"
                     return 0
                     ;;
                 *)
-                    printf 'error: non-upstream fork clone detected.\n' >&2
+                    printf 'error: non-canonical fork clone detected.\n' >&2
                     printf 'error: git origin: %s\n' "$origin_url" >&2
-                    printf 'error: refusing to silently fall back to the upstream install URL.\n' >&2
-                    printf 'error: this fork has no free-claude-code Python package at the repo root, so it cannot install itself.\n' >&2
+                    printf 'error: refusing to silently fall back to the canonical install URL.\n' >&2
                     printf 'error: re-run with FCC_REPO_URL pointing at the fork that publishes the Python package, e.g.\n' >&2
-                    printf 'error:   FCC_REPO_URL=git+https://github.com/Gelvey/free-claude-code.git sh install.sh\n' >&2
+                    printf 'error:   FCC_REPO_URL=git+https://github.com/YourUser/your-fork.git sh install.sh\n' >&2
                     return 1
                     ;;
             esac

@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -210,12 +211,20 @@ def test_install_ps1_validates_minimum_uv_version() -> None:
 def _run_install_sh(*args: str) -> subprocess.CompletedProcess[str]:
     """Run install.sh with given arguments and return the result."""
     sh = _repo_root() / "scripts" / "install.sh"
+    # Ensure FCC_REPO_URL is set so fork-detection doesn't block dry-run
+    # when CI is executing from a non-upstream fork clone (e.g. Gelvey/gelvey-fcc).
+    env = os.environ.copy()
+    env.setdefault(
+        "FCC_REPO_URL",
+        "git+https://github.com/Gelvey/gelvey-fcc.git",
+    )
     return subprocess.run(
         ["sh", str(sh), *args],
         cwd=_repo_root(),
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 

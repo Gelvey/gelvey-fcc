@@ -36,6 +36,12 @@ ZAI_DEFAULT_BASE = "https://api.z.ai/api/anthropic/v1"
 GEMINI_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
 CEREBRAS_DEFAULT_BASE = "https://api.cerebras.ai/v1"
+# Cloudflare Workers AI OpenAI-compat layer; ``CLOUDFLARE_AI_ACCOUNT_ID`` is
+# substituted at factory init time. Users can override the full URL via
+# ``CLOUDFLARE_AI_BASE_URL`` for proxies, mocks, or self-hosted gateways.
+CLOUDFLARE_AI_DEFAULT_BASE = (
+    "https://api.cloudflare.com/client/v4/accounts/CLOUDFLARE_AI_ACCOUNT_ID/ai/v1"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +175,17 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=CEREBRAS_DEFAULT_BASE,
         proxy_attr="cerebras_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+    ),
+    "cloudflare_ai": ProviderDescriptor(
+        provider_id="cloudflare_ai",
+        transport_type="openai_chat",
+        credential_env="CLOUDFLARE_AI_API_KEY",
+        credential_url="https://dash.cloudflare.com/profile/api-tokens",
+        credential_attr="cloudflare_ai_api_key",
+        default_base_url=CLOUDFLARE_AI_DEFAULT_BASE,
+        base_url_attr="cloudflare_ai_base_url",
+        proxy_attr="cloudflare_ai_proxy",
+        capabilities=("chat", "streaming", "tools", "rate_limit"),
     ),
     "groq": ProviderDescriptor(
         provider_id="groq",
