@@ -367,6 +367,12 @@ textarea {
   display: grid;
 }
 
+/* Cloudflare Workers AI section: long field labels overlap in a two-column
+   grid, so force full-width inside the cloudflare view. */
+.admin-view[data-view="cloudflare"] .field-grid {
+  grid-template-columns: 1fr;
+}
+
 .advanced-toggle {
   justify-self: start;
   margin-top: 14px;
