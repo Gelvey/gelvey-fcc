@@ -36,6 +36,13 @@ const VIEW_GROUPS = [
     sections: ["openrouter_policy"],
     containerId: "openrouterPolicySections",
   },
+  {
+    id: "cloudflare",
+    label: "CloudFlare AI",
+    title: "Cloudflare Workers AI",
+    sections: ["cloudflare"],
+    containerId: "cloudflareSections",
+  },
 ];
 
 const byId = (id) => document.getElementById(id);
