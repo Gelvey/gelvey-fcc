@@ -69,7 +69,7 @@ def test_launcher_sh_is_valid_bash() -> None:
 def test_launcher_sh_uses_home_not_hardcoded_path() -> None:
     """REPO_DIR uses $HOME, not /home/$USER."""
     text = _script_text()
-    assert 'REPO_DIR="$HOME/free-claude-code"' in text
+    assert 'REPO_DIR="$HOME/gelvey-fcc"' in text
     assert 'REPO_DIR="/home/' not in text
 
 
