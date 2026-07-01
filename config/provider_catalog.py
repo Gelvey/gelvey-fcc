@@ -185,7 +185,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=CLOUDFLARE_AI_DEFAULT_BASE,
         base_url_attr="cloudflare_ai_base_url",
         proxy_attr="cloudflare_ai_proxy",
-        capabilities=("chat", "streaming", "tools", "rate_limit"),
+        capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
     ),
     "groq": ProviderDescriptor(
         provider_id="groq",

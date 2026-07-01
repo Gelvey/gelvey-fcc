@@ -72,6 +72,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Provider keys, local endpoints, and proxy settings.",
     ),
     ConfigSectionSpec(
+        "cloudflare",
+        "Cloudflare Workers AI",
+        "Cloudflare Workers AI API token, account ID, and proxy settings.",
+    ),
+    ConfigSectionSpec(
         "openrouter_policy",
         "OpenRouter Policy",
         "Per-request data_collection policy and free-model allowlist.",
@@ -259,28 +264,28 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "CLOUDFLARE_AI_API_KEY",
         "Cloudflare Workers AI API Key",
-        "providers",
+        "cloudflare",
         "secret",
         settings_attr="cloudflare_ai_api_key",
         secret=True,
         description=(
             "Cloudflare Workers AI API token from "
             "[dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens). "
-            "Pair with ``CLOUDFLARE_AI_ACCOUNT_ID`` (dashboard sidebar). Free tier: "
+            "Requires ``Workers AI - Read`` and ``Workers AI - Edit`` permissions. "
+            "Pair with ``CLOUDFLARE_AI_ACCOUNT_ID`` below. Free tier: "
             "10,000 neurons/day reset at 00:00 UTC."
         ),
     ),
     ConfigFieldSpec(
         "CLOUDFLARE_AI_ACCOUNT_ID",
         "Cloudflare Workers AI Account ID",
-        "providers",
-        "secret",
+        "cloudflare",
         settings_attr="cloudflare_ai_account_id",
-        secret=True,
         description=(
             "Cloudflare account id used in the upstream URL path "
             "(``/client/v4/accounts/<id>/ai/v1/chat/completions``). Find it in "
-            "the Cloudflare dashboard right sidebar or via the Cloudflare API."
+            "the Cloudflare dashboard under **Workers AI → Use REST API**, or in "
+            "the right sidebar of any dashboard page."
         ),
     ),
     ConfigFieldSpec(
@@ -486,24 +491,31 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "CLOUDFLARE_AI_BASE_URL",
         "Cloudflare Workers AI Base URL",
-        "providers",
+        "cloudflare",
         settings_attr="cloudflare_ai_base_url",
         default="",
         advanced=True,
         description=(
             "Optional full URL override for proxies, mocks, or self-hosted "
-            "gateways. Empty falls back to the composed "
+            "gateways. When set, ``CLOUDFLARE_AI_ACCOUNT_ID`` is **not** substituted "
+            "into the URL — provide the complete endpoint including the account id "
+            "segment. Empty falls back to "
             "``https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1``."
         ),
     ),
     ConfigFieldSpec(
         "CLOUDFLARE_AI_PROXY",
         "Cloudflare Workers AI Proxy",
-        "providers",
+        "cloudflare",
         "secret",
         settings_attr="cloudflare_ai_proxy",
         secret=True,
         advanced=True,
+        description=(
+            "HTTP(S) proxy for Cloudflare Workers AI requests. "
+            "Format: ``http://user:pass@host:port``. "
+            "Leave empty for direct connections."
+        ),
     ),
     ConfigFieldSpec(
         "MODEL",
@@ -998,7 +1010,7 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "FCC_SMOKE_MODEL_CLOUDFLARE_AI",
         "Smoke Cloudflare Workers AI Model",
-        "smoke",
+        "cloudflare",
         advanced=True,
     ),
     ConfigFieldSpec(
@@ -1349,6 +1361,13 @@ def render_env_file(values: Mapping[str, str], *, mask_secrets: bool = False) ->
     return "\n".join(lines).rstrip() + "\n"
 
 
+# Extra required env vars beyond the primary credential_env for providers that
+# need multiple credentials.  Checked by :func:`provider_config_status`.
+_MULTI_CREDENTIAL_ENVS: dict[str, tuple[str, ...]] = {
+    "cloudflare_ai": ("CLOUDFLARE_AI_ACCOUNT_ID",),
+}
+
+
 def provider_config_status(
     state: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1373,16 +1392,32 @@ def provider_config_status(
             continue
 
         value = str(state.get(descriptor.credential_env, {}).get("value", ""))
-        configured = bool(value.strip())
-        statuses.append(
-            {
-                "provider_id": provider_id,
-                "kind": "remote",
-                "status": "configured" if configured else "missing_key",
-                "label": "Configured" if configured else "Missing key",
-                "credential_env": descriptor.credential_env,
-            }
-        )
+        primary_ok = bool(value.strip())
+
+        missing_extras: list[str] = []
+        for extra_env in _MULTI_CREDENTIAL_ENVS.get(provider_id, ()):
+            extra_val = str(state.get(extra_env, {}).get("value", ""))
+            if not extra_val.strip():
+                missing_extras.append(extra_env)
+
+        if not primary_ok:
+            status, label = "missing_key", "Missing key"
+        elif missing_extras:
+            status = "partial"
+            label = f"Missing: {', '.join(missing_extras)}"
+        else:
+            status, label = "configured", "Configured"
+
+        entry: dict[str, Any] = {
+            "provider_id": provider_id,
+            "kind": "remote",
+            "status": status,
+            "label": label,
+            "credential_env": descriptor.credential_env,
+        }
+        if missing_extras:
+            entry["missing_envs"] = missing_extras
+        statuses.append(entry)
     return statuses
 
 
