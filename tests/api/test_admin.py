@@ -100,6 +100,16 @@ def test_admin_static_defines_openrouter_policy_view():
     assert 'id="openrouterPolicySections"' in html
 
 
+def test_admin_static_defines_cloudflare_view():
+    script = Path("api/admin_static/admin.js").read_text(encoding="utf-8")
+    html = Path("api/admin_static/index.html").read_text(encoding="utf-8")
+
+    assert 'id: "cloudflare"' in script
+    assert 'containerId: "cloudflareSections"' in script
+    assert 'data-view="cloudflare"' in html
+    assert 'id="cloudflareSections"' in html
+
+
 def test_admin_static_serves_favicon_svg(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_app(lifespan_enabled=False)
