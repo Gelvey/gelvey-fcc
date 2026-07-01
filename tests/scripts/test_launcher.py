@@ -149,10 +149,37 @@ def test_launcher_sh_warmup_for_fcc_server() -> None:
     assert "waiting" in text.lower() and "fcc-server" in text.lower()
 
 
-def test_launcher_sh_git_pull_before_start() -> None:
-    """Script does a git pull --ff-only before launching."""
+def test_launcher_sh_fetches_remote_before_launch() -> None:
+    """Script fetches origin and shows commits before launching."""
     text = _script_text()
-    assert "git pull --ff-only" in text
+    assert "git fetch origin" in text
+    assert "git log" in text
+
+
+def test_launcher_sh_prompts_for_force_pull() -> None:
+    """Script asks user whether to force-pull gelvey-fcc."""
+    text = _script_text()
+    assert "Pull latest state of gelvey-fcc" in text
+    assert "read -r REPLY" in text
+
+
+def test_launcher_sh_force_pull_on_confirm() -> None:
+    """Script does git reset --hard when user confirms with y."""
+    text = _script_text()
+    assert "git reset --hard" in text
+    assert 'REPLY" = "y"' in text
+
+
+def test_launcher_sh_warns_about_discarding_changes() -> None:
+    """Script warns user that force-pull discards local changes."""
+    text = _script_text()
+    assert "DISCARD" in text or "discard" in text.lower()
+
+
+def test_launcher_sh_skips_pull_on_reject() -> None:
+    """Script skips pull when user does not confirm."""
+    text = _script_text()
+    assert "Skipping pull" in text
 
 
 def test_launcher_sh_fork_url_configurable() -> None:
