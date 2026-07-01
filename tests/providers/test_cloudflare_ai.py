@@ -3,11 +3,13 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from config.settings import Settings
 from providers.base import ProviderConfig
 from providers.cloudflare_ai import CLOUDFLARE_AI_DEFAULT_BASE, CloudflareAiProvider
+from providers.cloudflare_ai.client import _FALLBACK_MODEL_IDS
 from providers.exceptions import AuthenticationError
 
 
@@ -68,6 +70,30 @@ def cloudflare_provider(cloudflare_config):
     return CloudflareAiProvider(cloudflare_config)
 
 
+def _cf_models_payload(*model_ids: str) -> dict:
+    """Build a minimal Cloudflare /ai/models response payload."""
+    return {
+        "success": True,
+        "result": [
+            {
+                "id": mid,
+                "task": {"id": "text-generation", "name": "Text Generation"},
+                "name": mid.split("/")[-1],
+            }
+            for mid in model_ids
+        ],
+    }
+
+
+def _cf_models_response(*model_ids: str, status_code: int = 200) -> httpx.Response:
+    """Build a fake httpx.Response wrapping a Cloudflare models payload."""
+    return httpx.Response(
+        status_code=status_code,
+        json=_cf_models_payload(*model_ids),
+        request=httpx.Request("GET", "https://api.cloudflare.com/"),
+    )
+
+
 def test_default_base_url_constant_contains_placeholder():
     assert (
         CLOUDFLARE_AI_DEFAULT_BASE
@@ -85,12 +111,112 @@ def test_init(cloudflare_config):
         mock_openai.assert_called_once()
 
 
+def test_models_endpoint_standard_url(cloudflare_provider):
+    """Standard /ai/v1 base URL is rewritten to /ai/models."""
+    assert cloudflare_provider._models_endpoint() == (
+        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models"
+    )
+
+
+def test_models_endpoint_custom_url():
+    """Custom base URLs get /models appended."""
+    provider = CloudflareAiProvider(
+        ProviderConfig(
+            api_key="tok",
+            base_url="https://my-proxy.example.com/cf-ai",
+            rate_limit=1,
+            rate_window=60,
+        )
+    )
+    assert provider._models_endpoint() == "https://my-proxy.example.com/cf-ai/models"
+
+
 @pytest.mark.asyncio
-async def test_list_model_ids_returns_curated_set(cloudflare_provider):
-    model_ids = await cloudflare_provider.list_model_ids()
+async def test_list_model_ids_fetches_from_api(cloudflare_provider):
+    """Live /ai/models response is parsed and text-generation models returned."""
+    payload = {
+        "success": True,
+        "result": [
+            {
+                "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                "task": {"id": "text-generation", "name": "Text Generation"},
+            },
+            {
+                "id": "@cf/qwen/qwen2.5-coder-32b-instruct",
+                "task": {"id": "text-generation", "name": "Text Generation"},
+            },
+            {
+                "id": "@cf/meta/llama-3.1-8b-instruct",
+                "task": {"id": "text-generation", "name": "Text Generation"},
+            },
+            {
+                "id": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+                "task": {"id": "text-generation", "name": "Text Generation"},
+            },
+            {
+                "id": "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+                "task": {"id": "image-generation", "name": "Image Generation"},
+            },
+            {
+                "id": "@cf/baai/bge-base-en-v1.5",
+                "task": {"id": "text-embeddings", "name": "Text Embeddings"},
+            },
+        ],
+    }
+    mock_response = httpx.Response(
+        status_code=200,
+        json=payload,
+        request=httpx.Request("GET", "https://api.cloudflare.com/"),
+    )
+
+    with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get.return_value = mock_response
+
+        model_ids = await cloudflare_provider.list_model_ids()
+
     assert "@cf/meta/llama-3.3-70b-instruct-fp8-fast" in model_ids
     assert "@cf/qwen/qwen2.5-coder-32b-instruct" in model_ids
-    assert all(model.startswith("@cf/") for model in model_ids)
+    assert all(mid.startswith("@cf/") for mid in model_ids)
+    # Non-text-generation models (image-generation, embeddings) are excluded.
+    assert "@cf/stabilityai/stable-diffusion-xl-base-1.0" not in model_ids
+    assert "@cf/baai/bge-base-en-v1.5" not in model_ids
+    assert len(model_ids) == 4
+
+
+@pytest.mark.asyncio
+async def test_list_model_ids_falls_back_on_http_error(cloudflare_provider):
+    """Network errors cause fallback to the curated model set."""
+    with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get.side_effect = httpx.ConnectError("connection refused")
+
+        model_ids = await cloudflare_provider.list_model_ids()
+
+    assert model_ids == _FALLBACK_MODEL_IDS
+
+
+@pytest.mark.asyncio
+async def test_list_model_ids_falls_back_on_malformed_response(cloudflare_provider):
+    """Malformed JSON (no text-generation models) triggers fallback."""
+    with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        bad_response = httpx.Response(
+            status_code=200,
+            json={"success": True, "result": []},
+            request=httpx.Request("GET", "https://api.cloudflare.com/"),
+        )
+        mock_client.get.return_value = bad_response
+
+        model_ids = await cloudflare_provider.list_model_ids()
+
+    assert model_ids == _FALLBACK_MODEL_IDS
 
 
 def test_build_request_body_basic(cloudflare_provider):
@@ -229,3 +355,117 @@ def test_factory_raises_when_account_id_missing():
         _create_cloudflare_ai(config, settings)
 
     assert "CLOUDFLARE_AI_ACCOUNT_ID" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# extract_cloudflare_ai_model_ids unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractCloudflareAiModelIds:
+    """Unit tests for the Cloudflare /ai/models response parser."""
+
+    def test_extracts_text_generation_models(self):
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = _cf_models_payload(
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/qwen/qwen2.5-coder-32b-instruct",
+        )
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset(
+            {
+                "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                "@cf/qwen/qwen2.5-coder-32b-instruct",
+            }
+        )
+
+    def test_filters_out_non_text_generation_models(self):
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "task": {"id": "text-generation", "name": "Text Generation"},
+                },
+                {
+                    "id": "@cf/baai/bge-base-en-v1.5",
+                    "task": {"id": "text-embeddings", "name": "Text Embeddings"},
+                },
+                {
+                    "id": "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+                    "task": {"id": "image-generation", "name": "Image Generation"},
+                },
+            ],
+        }
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_raises_on_missing_result_field(self):
+        from providers.exceptions import ModelListResponseError
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        with pytest.raises(ModelListResponseError, match="result array"):
+            extract_cloudflare_ai_model_ids(
+                {"success": True}, provider_name="CLOUDFLARE_AI"
+            )
+
+    def test_raises_on_empty_result(self):
+        from providers.exceptions import ModelListResponseError
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        with pytest.raises(ModelListResponseError, match="text-generation"):
+            extract_cloudflare_ai_model_ids(
+                {"success": True, "result": []}, provider_name="CLOUDFLARE_AI"
+            )
+
+    def test_raises_when_no_text_generation_models(self):
+        from providers.exceptions import ModelListResponseError
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "@cf/baai/bge-base-en-v1.5",
+                    "task": {"id": "text-embeddings", "name": "Text Embeddings"},
+                },
+            ],
+        }
+        with pytest.raises(ModelListResponseError, match="text-generation"):
+            extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+
+    def test_skips_items_without_id(self):
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {"task": {"id": "text-generation"}},
+                {
+                    "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "task": {"id": "text-generation", "name": "Text Generation"},
+                },
+            ],
+        }
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_handles_result_as_object_with_result_attr(self):
+        """Supports both dict and object-style payloads (like OpenAI SDK objects)."""
+        from types import SimpleNamespace
+
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = SimpleNamespace(
+            result=[
+                SimpleNamespace(
+                    id="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    task=SimpleNamespace(id="text-generation"),
+                ),
+            ]
+        )
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})

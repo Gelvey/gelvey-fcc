@@ -90,6 +90,36 @@ def extract_openrouter_tool_model_infos(
     return frozenset(model_infos)
 
 
+def extract_cloudflare_ai_model_ids(
+    payload: Any, *, provider_name: str
+) -> frozenset[str]:
+    """Extract text-generation model ids from a Cloudflare Workers AI ``/ai/models`` response.
+
+    Only models whose ``task.id`` is ``text-generation`` are included; embeddings,
+    image-generation, audio, and other task types are filtered out because they
+    cannot be used for chat completions.
+    """
+    result = _field(payload, "result")
+    if not _is_sequence(result):
+        raise _malformed(provider_name, "expected top-level result array")
+
+    model_ids: set[str] = set()
+    for item in result:
+        model_id = _field(item, "id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        task = _field(item, "task")
+        task_id = _field(task, "id") if task is not None else None
+        if task_id == "text-generation":
+            model_ids.add(model_id)
+
+    if not model_ids:
+        raise _malformed(
+            provider_name, "response did not include any text-generation model ids"
+        )
+    return frozenset(model_ids)
+
+
 def extract_ollama_model_ids(payload: Any, *, provider_name: str) -> frozenset[str]:
     """Extract model ids from Ollama's native ``/api/tags`` response."""
     models = _field(payload, "models")
