@@ -478,7 +478,14 @@ async function testProvider(providerId, button) {
       ).sort();
       syncModelDatalist();
     } else {
-      updateProviderCard(providerId, "offline", result.error_type, result.error_type);
+      console.error(`[${providerId}] Provider test failed:`, result);
+      const errorLabel = result.status_code
+        ? `HTTP ${result.status_code}`
+        : result.error_type;
+      const errorMeta = result.request_url
+        ? `${result.error_message} (${result.request_url})`
+        : result.error_message || result.error_type;
+      updateProviderCard(providerId, "offline", errorLabel, errorMeta);
     }
   } finally {
     button.disabled = false;

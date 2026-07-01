@@ -152,8 +152,17 @@ def _create_cloudflare_ai(config: ProviderConfig, settings: Settings) -> BasePro
                 "or via the Cloudflare API."
             )
         resolved_url = raw_base_url.replace("CLOUDFLARE_AI_ACCOUNT_ID", account_id)
+        logger.debug(
+            "CLOUDFLARE_AI_FACTORY: resolved base_url with account_id={} raw_url={}",
+            account_id,
+            raw_base_url,
+        )
     else:
         resolved_url = raw_base_url
+        logger.debug(
+            "CLOUDFLARE_AI_FACTORY: using custom base_url (no account_id substitution) url={}",
+            resolved_url,
+        )
 
     composed_config = config.model_copy(update={"base_url": resolved_url})
     return CloudflareAiProvider(composed_config)

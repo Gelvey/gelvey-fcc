@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
@@ -614,3 +614,72 @@ def test_admin_launch_url_uses_loopback_for_wildcard_host():
     settings = Settings.model_construct(host="0.0.0.0", port=8082)
 
     assert local_admin_url(settings) == "http://127.0.0.1:8082/admin"
+
+
+def test_admin_test_provider_returns_http_error_details(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("CLOUDFLARE_AI_API_KEY", "test-key")
+    monkeypatch.setenv("CLOUDFLARE_AI_ACCOUNT_ID", "test-account")
+    app = create_app(lifespan_enabled=False)
+
+    error_response = httpx.Response(
+        status_code=401,
+        json={
+            "success": False,
+            "errors": [{"code": 10000, "message": "Authentication error"}],
+        },
+        request=httpx.Request("GET", "https://api.cloudflare.com/"),
+    )
+    http_error = httpx.HTTPStatusError(
+        "401 Unauthorized",
+        request=httpx.Request("GET", "https://api.cloudflare.com/"),
+        response=error_response,
+    )
+
+    async def mock_list_model_infos():
+        raise http_error
+
+    with patch("providers.registry.ProviderRegistry.get") as mock_get:
+        mock_provider = MagicMock()
+        mock_provider.list_model_infos = mock_list_model_infos
+        mock_get.return_value = mock_provider
+        response = _local_client(app).post(
+            "/admin/api/providers/cloudflare_ai/test",
+            json={},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_type"] == "HTTPStatusError"
+    assert body["status_code"] == 401
+    assert body["error_message"] == "Authentication error"
+
+
+def test_admin_test_provider_returns_generic_error_for_non_http_exception(
+    monkeypatch, tmp_path
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("CLOUDFLARE_AI_API_KEY", "test-key")
+    monkeypatch.setenv("CLOUDFLARE_AI_ACCOUNT_ID", "test-account")
+    app = create_app(lifespan_enabled=False)
+
+    with patch("providers.registry.ProviderRegistry.get") as mock_get:
+        mock_provider = MagicMock()
+        mock_provider.list_model_infos = AsyncMock(
+            side_effect=ConnectionError("connection refused")
+        )
+        mock_get.return_value = mock_provider
+        response = _local_client(app).post(
+            "/admin/api/providers/cloudflare_ai/test",
+            json={},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_type"] == "ConnectionError"
+    assert body["error_message"] == "connection refused"
+    assert "status_code" not in body

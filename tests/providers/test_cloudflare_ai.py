@@ -89,7 +89,10 @@ def _cf_models_response(*model_ids: str, status_code: int = 200) -> httpx.Respon
     return httpx.Response(
         status_code=status_code,
         json=_cf_models_payload(*model_ids),
-        request=httpx.Request("GET", "https://api.cloudflare.com/"),
+        request=httpx.Request(
+            "GET",
+            "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models/search",
+        ),
     )
 
 
@@ -111,14 +114,14 @@ def test_init(cloudflare_config):
 
 
 def test_models_endpoint_standard_url(cloudflare_provider):
-    """Standard /ai/v1 base URL is rewritten to /ai/models."""
+    """Standard /ai/v1 base URL is rewritten to /ai/models/search."""
     assert cloudflare_provider._models_endpoint() == (
-        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models"
+        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models/search"
     )
 
 
 def test_models_endpoint_custom_url():
-    """Custom base URLs get /models appended."""
+    """Custom base URLs get /models/search appended."""
     provider = CloudflareAiProvider(
         ProviderConfig(
             api_key="tok",
@@ -127,7 +130,10 @@ def test_models_endpoint_custom_url():
             rate_window=60,
         )
     )
-    assert provider._models_endpoint() == "https://my-proxy.example.com/cf-ai/models"
+    assert (
+        provider._models_endpoint()
+        == "https://my-proxy.example.com/cf-ai/models/search"
+    )
 
 
 @pytest.mark.asyncio
@@ -485,5 +491,87 @@ class TestExtractCloudflareAiModelIds:
                 ),
             ]
         )
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_handles_task_as_string(self):
+        """Supports /ai/models/search format where task is a plain string."""
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "task": "text-generation",
+                },
+                {
+                    "id": "@cf/baai/bge-base-en-v1.5",
+                    "task": "text-embeddings",
+                },
+            ],
+        }
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_handles_type_field_instead_of_task(self):
+        """Supports response format where type field is used instead of task."""
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "type": "text-generation",
+                },
+                {
+                    "id": "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+                    "type": "image-generation",
+                },
+            ],
+        }
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_handles_task_name_text_generation(self):
+        """Supports response format where task.name is 'Text Generation'."""
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "task": {"name": "Text Generation"},
+                },
+                {
+                    "id": "@cf/baai/bge-base-en-v1.5",
+                    "task": {"name": "Text Embeddings"},
+                },
+            ],
+        }
+        result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
+        assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+
+    def test_handles_uuid_id_with_name_field(self):
+        """Supports /ai/models/search format where id is UUID and name is the model name."""
+        from providers.model_listing import extract_cloudflare_ai_model_ids
+
+        payload = {
+            "success": True,
+            "result": [
+                {
+                    "id": "02c16efa-29f5-4304-8e6c-3d188889f875",
+                    "name": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "task": {"id": "text-generation", "name": "Text Generation"},
+                },
+                {
+                    "id": "06455e78-19f7-487b-93cd-c05a3dd07813",
+                    "name": "@cf/baai/bge-base-en-v1.5",
+                    "task": {"id": "text-embeddings", "name": "Text Embeddings"},
+                },
+            ],
+        }
         result = extract_cloudflare_ai_model_ids(payload, provider_name="CLOUDFLARE_AI")
         assert result == frozenset({"@cf/meta/llama-3.3-70b-instruct-fp8-fast"})

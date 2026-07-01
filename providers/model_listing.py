@@ -95,9 +95,15 @@ def extract_cloudflare_ai_model_ids(
 ) -> frozenset[str]:
     """Extract text-generation model ids from a Cloudflare Workers AI ``/ai/models`` response.
 
-    Only models whose ``task.id`` is ``text-generation`` are included; embeddings,
-    image-generation, audio, and other task types are filtered out because they
-    cannot be used for chat completions.
+    Only text-generation models are included; embeddings, image-generation, audio,
+    and other task types are filtered out because they cannot be used for chat
+    completions.
+
+    Handles multiple response formats:
+    - ``/ai/models``: ``{"id": "@cf/...", "task": {"id": "text-generation"}}``
+    - ``/ai/models/search``: ``{"id": "<uuid>", "name": "@cf/...", "task": ...}``
+      or other variants where the model name is in ``name``, ``model``,
+      or ``model_id`` fields.
     """
     result = _field(payload, "result")
     if not _is_sequence(result):
@@ -105,12 +111,10 @@ def extract_cloudflare_ai_model_ids(
 
     model_ids: set[str] = set()
     for item in result:
-        model_id = _field(item, "id")
-        if not isinstance(model_id, str) or not model_id.strip():
+        model_id = _extract_model_id(item)
+        if not model_id:
             continue
-        task = _field(item, "task")
-        task_id = _field(task, "id") if task is not None else None
-        if task_id == "text-generation":
+        if _is_text_generation_model(item):
             model_ids.add(model_id)
 
     if not model_ids:
@@ -118,6 +122,51 @@ def extract_cloudflare_ai_model_ids(
             provider_name, "response did not include any text-generation model ids"
         )
     return frozenset(model_ids)
+
+
+def _extract_model_id(item: Any) -> str | None:
+    """Extract the usable model id from a Cloudflare AI model item.
+
+    The ``/ai/models/search`` endpoint returns UUIDs in ``id`` and the actual
+    model name (e.g. ``@cf/meta/llama-3.3-70b-instruct-fp8-fast``) in ``name``,
+    ``model``, or ``model_id``.  Prefer the human-readable name when available.
+    """
+    # Check alternative name fields first (preferred for /ai/models/search)
+    for field_name in ("name", "model", "model_id"):
+        value = _field(item, field_name)
+        if isinstance(value, str) and value.strip() and value.startswith("@"):
+            return value
+    # Fall back to id field
+    raw_id = _field(item, "id")
+    if isinstance(raw_id, str) and raw_id.strip():
+        return raw_id
+    return None
+
+
+def _is_text_generation_model(item: Any) -> bool:
+    """Check if a model item represents a text-generation model.
+
+    Supports multiple response formats from different Cloudflare AI endpoints:
+    - Dict with ``task.id`` or ``task.name``
+    - Object-style (``SimpleNamespace``) with ``task.id`` attribute
+    - ``task`` as a plain string
+    - ``type`` field instead of ``task``
+    """
+    task = _field(item, "task")
+    # Check task as Mapping (dict) or object with attributes
+    task_id = _field(task, "id") if task is not None else None
+    if task_id == "text-generation":
+        return True
+    # Also check task.name for "Text Generation" (case-insensitive)
+    task_name = _field(task, "name") if task is not None else None
+    if isinstance(task_name, str) and task_name.lower() == "text generation":
+        return True
+    # Format: task as string (/ai/models/search variant)
+    if isinstance(task, str) and task == "text-generation":
+        return True
+    # Format: type field instead of task
+    item_type = _field(item, "type")
+    return isinstance(item_type, str) and item_type == "text-generation"
 
 
 def extract_ollama_model_ids(payload: Any, *, provider_name: str) -> frozenset[str]:

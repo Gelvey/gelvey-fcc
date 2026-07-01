@@ -179,13 +179,34 @@ async def test_provider(provider_id: str, request: Request):
         request.app.state.provider_registry = registry
     try:
         provider = registry.get(provider_id, settings)
+        # Capture the models endpoint URL before the request for error diagnostics
+        request_url = None
+        models_endpoint = getattr(provider, "_models_endpoint", None)
+        if callable(models_endpoint):
+            request_url = models_endpoint()
         infos = await provider.list_model_infos()
-    except Exception as exc:
-        return {
+    except httpx.HTTPStatusError as exc:
+        error_message = _extract_http_error_message(exc)
+        result: dict[str, Any] = {
             "provider_id": provider_id,
             "ok": False,
             "error_type": type(exc).__name__,
+            "status_code": exc.response.status_code,
+            "error_message": error_message,
         }
+        if request_url:
+            result["request_url"] = request_url
+        return result
+    except Exception as exc:
+        error_result: dict[str, Any] = {
+            "provider_id": provider_id,
+            "ok": False,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
+        if request_url:
+            error_result["request_url"] = request_url
+        return error_result
     registry.cache_model_infos(provider_id, infos)
     return {
         "provider_id": provider_id,
@@ -209,6 +230,33 @@ async def refresh_models(request: Request):
             for provider_id, model_ids in registry.cached_model_ids().items()
         }
     }
+
+
+def _extract_http_error_message(exc: httpx.HTTPStatusError) -> str:
+    """Extract a human-readable error message from an HTTP status error response."""
+    try:
+        body = exc.response.json()
+        if isinstance(body, dict):
+            # Cloudflare API error format: {"success": false, "errors": [...]}
+            errors = body.get("errors")
+            if isinstance(errors, list) and errors:
+                first_error = errors[0]
+                if isinstance(first_error, dict):
+                    return first_error.get("message", str(first_error))
+                return str(first_error)
+            # OpenAI-compatible error format: {"error": {"message": "..."}}
+            error = body.get("error")
+            if isinstance(error, dict):
+                return error.get("message", str(error))
+            # Generic error format: {"message": "..."}
+            message = body.get("message")
+            if isinstance(message, str):
+                return message
+    except Exception:
+        pass
+    # Fallback to response text (truncated)
+    text = exc.response.text[:200] if exc.response.text else ""
+    return text or f"HTTP {exc.response.status_code}"
 
 
 def _filtered_values(values: dict[str, Any]) -> dict[str, Any]:
