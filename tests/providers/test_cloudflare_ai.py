@@ -9,8 +9,7 @@ import pytest
 from config.settings import Settings
 from providers.base import ProviderConfig
 from providers.cloudflare_ai import CLOUDFLARE_AI_DEFAULT_BASE, CloudflareAiProvider
-from providers.cloudflare_ai.client import _FALLBACK_MODEL_IDS
-from providers.exceptions import AuthenticationError
+from providers.exceptions import AuthenticationError, ModelListResponseError
 
 
 class MockMessage:
@@ -187,22 +186,21 @@ async def test_list_model_ids_fetches_from_api(cloudflare_provider):
 
 
 @pytest.mark.asyncio
-async def test_list_model_ids_falls_back_on_http_error(cloudflare_provider):
-    """Network errors cause fallback to the curated model set."""
+async def test_list_model_ids_raises_on_http_error(cloudflare_provider):
+    """Network errors propagate to the caller instead of silently falling back."""
     with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_client.get.side_effect = httpx.ConnectError("connection refused")
 
-        model_ids = await cloudflare_provider.list_model_ids()
-
-    assert model_ids == _FALLBACK_MODEL_IDS
+        with pytest.raises(httpx.ConnectError, match="connection refused"):
+            await cloudflare_provider.list_model_ids()
 
 
 @pytest.mark.asyncio
-async def test_list_model_ids_falls_back_on_malformed_response(cloudflare_provider):
-    """Malformed JSON (no text-generation models) triggers fallback."""
+async def test_list_model_ids_raises_on_malformed_response(cloudflare_provider):
+    """Malformed JSON (no text-generation models) raises instead of silently falling back."""
     with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -214,9 +212,29 @@ async def test_list_model_ids_falls_back_on_malformed_response(cloudflare_provid
         )
         mock_client.get.return_value = bad_response
 
-        model_ids = await cloudflare_provider.list_model_ids()
+        with pytest.raises(ModelListResponseError, match="text-generation"):
+            await cloudflare_provider.list_model_ids()
 
-    assert model_ids == _FALLBACK_MODEL_IDS
+
+@pytest.mark.asyncio
+async def test_list_model_ids_raises_on_http_status_error(cloudflare_provider):
+    """HTTP status errors (401, 403, 429, etc.) propagate to the caller."""
+    with patch("providers.cloudflare_ai.client.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        error_response = httpx.Response(
+            status_code=401,
+            json={
+                "success": False,
+                "errors": [{"code": 10000, "message": "Authentication error"}],
+            },
+            request=httpx.Request("GET", "https://api.cloudflare.com/"),
+        )
+        mock_client.get.return_value = error_response
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await cloudflare_provider.list_model_ids()
 
 
 def test_build_request_body_basic(cloudflare_provider):
