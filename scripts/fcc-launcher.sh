@@ -6,7 +6,7 @@
 # opening the main tabs. No patch overlay needed — the fork has all
 # customisations merged directly.
 #
-# Requires: kitty, fcc-server, fcc-claude, git, kitten (ships with kitty)
+# Requires: kitty, uv, git, kitten (ships with kitty)
 
 REPO_DIR="$HOME/gelvey-fcc"
 # Override with FCC_FORK_URL=<url> to track a different remote.
@@ -148,7 +148,9 @@ kitty \
     || { rm -f "$PREFLIGHT_SCRIPT"; echo "[fcc] Pre-flight kitty exited with error"; }
 
 # ── Dependency check (remaining deps — after preflight) ──────────────────────
-for cmd in fcc-server fcc-claude git; do
+# fcc-server and fcc-claude are launched via `uv run` from the repo so the
+# latest source is always used — only `uv` and `git` need to be on PATH.
+for cmd in uv git; do
     if ! command -v "$cmd" &> /dev/null; then
         notify critical "FCC Launcher" "Error: '$cmd' is not installed"
         exit 1
@@ -192,7 +194,7 @@ kitty \
     --listen-on "unix:$SOCKET" \
     --override "allow_remote_control=socket-only" \
     --title "FCC" \
-    bash -c "echo '=== FCC Claude (waiting ${FCC_CLIENT_WARMUP_S:-5}s for fcc-server) ===' && sleep ${FCC_CLIENT_WARMUP_S:-5} && fcc-claude; exec bash" &
+    bash -c "echo '=== FCC Claude (waiting ${FCC_CLIENT_WARMUP_S:-5}s for fcc-server) ===' && sleep ${FCC_CLIENT_WARMUP_S:-5} && uv run fcc-claude; exec bash" &
 
 KITTY_PID=$!
 sleep 1
@@ -233,23 +235,16 @@ else
     echo "[fcc] MCP Router tab skipped (start_mcp.sh missing or deps not on PATH)"
 fi
 
-# Tab 2: FCC Server
-if command -v fcc-server >/dev/null 2>&1; then
-    spawn_tab "FCC Server" bash -c "echo '=== FCC Server ===' && fcc-server; exec bash"
-else
-    echo "[fcc] fcc-server not on PATH; skipping server tab"
-fi
+# Tab 2: FCC Server (run from repo via uv so the latest source is always used)
+spawn_tab "FCC Server" bash -c "echo '=== FCC Server ===' && uv run fcc-server; exec bash"
 
 # The first kitty window already has the FCC Claude tab.
 
-TABS_OPENED=1  # FCC Claude tab always opens first
+TABS_OPENED=2  # FCC Claude + FCC Server always open
 if [ -x "$MCP_SCRIPT" ] && command -v npx >/dev/null 2>&1 \
         && command -v socat >/dev/null 2>&1 \
         && command -v jq >/dev/null 2>&1 \
         && command -v uv >/dev/null 2>&1; then
-    TABS_OPENED=$((TABS_OPENED + 1))
-fi
-if command -v fcc-server >/dev/null 2>&1; then
     TABS_OPENED=$((TABS_OPENED + 1))
 fi
 
